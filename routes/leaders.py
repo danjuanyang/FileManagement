@@ -2,7 +2,6 @@
 from flask import Blueprint, request, jsonify
 from flask_cors import CORS
 
-from app import app
 from modles import db, Project, ProjectFile, User
 from datetime import datetime
 from werkzeug.utils import secure_filename
@@ -11,7 +10,7 @@ import os
 leader_bp = Blueprint('leader', __name__)
 
 # 允许所有跨域
-CORS(app)
+CORS(leader_bp)
 # 获取所有项目列表
 @leader_bp.route('/projects', methods=['GET'])
 def get_projects():

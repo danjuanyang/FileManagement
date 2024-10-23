@@ -13,6 +13,10 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = '9888898888'
 
 db.init_app(app)
+from routes.leaders import leader_bp
+app.register_blueprint(leader_bp, url_prefix='/api/leader')
+
+
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -58,8 +62,6 @@ def register():
     db.session.commit()
 
     return jsonify({'message': '用户注册成功'}), 201
-
-
 
 
 

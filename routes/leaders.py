@@ -1,17 +1,13 @@
-# routes/leader.py
+# routes/leaders.py
 from flask import Blueprint, request, jsonify
 from flask_cors import CORS
-
 from modles import db, Project, ProjectFile, User
 from datetime import datetime
-from werkzeug.utils import secure_filename
-import os
 
 leader_bp = Blueprint('leader', __name__)
-
-# 允许所有跨域
 CORS(leader_bp)
-# 获取所有项目列表
+
+
 @leader_bp.route('/projects', methods=['GET'])
 def get_projects():
     page = request.args.get('page', 1, type=int)
@@ -24,14 +20,17 @@ def get_projects():
 
     projects = query.paginate(page=page, per_page=per_page)
 
+    def format_date(date):
+        return date.strftime('%Y-%m-%d') if date else None
+
     return jsonify({
         'projects': [{
             'id': p.id,
             'name': p.name,
             'description': p.description,
             'employee': p.employee.username if p.employee else None,
-            'start_date': p.start_date.isoformat(),
-            'deadline': p.deadline.isoformat(),
+            'start_date': format_date(p.start_date),
+            'deadline': format_date(p.deadline),
             'progress': p.progress,
             'status': p.status
         } for p in projects.items],
@@ -41,10 +40,17 @@ def get_projects():
     })
 
 
-# 创建新项目
+
+# 创建项目
 @leader_bp.route('/projects', methods=['POST'])
 def create_project():
     data = request.get_json()
+
+    # 验证员工是否存在
+    if 'employee_id' in data:
+        employee = User.query.get(data['employee_id'])
+        if not employee:
+            return jsonify({'error': '员工不存在'}), 400
 
     project = Project(
         name=data['name'],
@@ -64,23 +70,59 @@ def create_project():
     }), 201
 
 
+
 # 更新项目
 @leader_bp.route('/projects/<int:project_id>', methods=['PUT'])
 def update_project(project_id):
     project = Project.query.get_or_404(project_id)
     data = request.get_json()
 
-    for key, value in data.items():
-        if hasattr(project, key):
-            if key in ['start_date', 'deadline']:
-                value = datetime.fromisoformat(value)
-            setattr(project, key, value)
+    # 明确定义可更新的字段及其处理方式
+    update_handlers = {
+        'name': lambda x: x,
+        'description': lambda x: x,
+        'status': lambda x: x,
+        'progress': lambda x: x,
+        'start_date': lambda x: datetime.fromisoformat(x),
+        'deadline': lambda x: datetime.fromisoformat(x),
+        'employee': lambda x: User.query.get(x) if x else None,
+        'employee_id': lambda x: User.query.get(x) if x else None
+    }
 
-    db.session.commit()
-    return jsonify({'message': '项目更新成功'})
+    try:
+        for key, value in data.items():
+            if key in update_handlers:
+                if key == 'employee' or key == 'employee_id':
+                    if value:
+                        employee = User.query.get(value)
+                        if employee is None:
+                            return jsonify({'error': f'员工ID {value} 不存在'}), 400
+                        project.employee = employee
+                else:
+                    processed_value = update_handlers[key](value)
+                    setattr(project, key, processed_value)
+
+        db.session.commit()
+        return jsonify({
+            'message': '项目更新成功',
+            'project': {
+                'id': project.id,
+                'name': project.name,
+                'description': project.description,
+                'employee': project.employee.username if project.employee else None,
+                'start_date': project.start_date.isoformat() if project.start_date else None,
+                'deadline': project.deadline.isoformat() if project.deadline else None,
+                'progress': project.progress,
+                'status': project.status
+            }
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
 
 
-# 获取项目文件列表
+
+# 查看项目文件
 @leader_bp.route('/projects/<int:project_id>/files', methods=['GET'])
 def get_project_files(project_id):
     files = ProjectFile.query.filter_by(project_id=project_id).all()
@@ -112,7 +154,6 @@ def search_files():
             'upload_user': f.upload_user.username
         } for f in files]
     })
-
 
 # 获取所有员工列表
 @leader_bp.route('/employees', methods=['GET'])

@@ -1,7 +1,7 @@
 # routes/leaders.py
 from flask import Blueprint, request, jsonify
 from flask_cors import CORS
-from modles import db, Project, ProjectFile, User
+from models import db, Project, ProjectFile, User
 from datetime import datetime
 
 leader_bp = Blueprint('leader', __name__)

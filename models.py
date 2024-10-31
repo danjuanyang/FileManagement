@@ -6,6 +6,7 @@ from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
 
+
 # 用户表
 class User(db.Model):
     __tablename__ = 'users'
@@ -21,7 +22,7 @@ class User(db.Model):
     def check_password(self, password):
         return bcrypt.checkpw(password.encode('utf-8'), self.password_hash.encode('utf-8'))
 
-
+# models.py
 
 # 项目表
 class Project(db.Model):
@@ -39,7 +40,8 @@ class Project(db.Model):
     # 关联
     employee = db.relationship('User', backref='projects')
     files = db.relationship('ProjectFile', backref='project', lazy=True)
-
+    stages = db.relationship('ProjectStage', back_populates='project', lazy=True)
+    updates = db.relationship('ProjectUpdate', back_populates='project')
 
 
 # 项目文件表
@@ -57,3 +59,29 @@ class ProjectFile(db.Model):
 
     upload_user = db.relationship('User', backref='uploaded_files')
 
+
+# 项目阶段表
+class ProjectStage(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), nullable=False)
+    description = db.Column(db.String(200), nullable=False)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    progress = db.Column(db.Integer, nullable=False)
+    status = db.Column(db.String(20), nullable=False)
+    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
+
+    project = db.relationship('Project', back_populates='stages')
+
+# 阶段更新表
+class ProjectUpdate(db.Model):
+    __tablename__ = 'project_updates'
+
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)  # Corrected table name
+    progress = db.Column(db.Integer, nullable=False)
+    description = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    type = db.Column(db.String(50))
+
+    project = db.relationship('Project', back_populates='updates')

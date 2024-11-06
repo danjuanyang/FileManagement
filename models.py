@@ -1,11 +1,8 @@
-# models.py
 from datetime import datetime
-
 import bcrypt
 from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
-
 
 # 用户表
 class User(db.Model):
@@ -21,8 +18,6 @@ class User(db.Model):
 
     def check_password(self, password):
         return bcrypt.checkpw(password.encode('utf-8'), self.password_hash.encode('utf-8'))
-
-# models.py
 
 # 项目表
 class Project(db.Model):
@@ -43,25 +38,10 @@ class Project(db.Model):
     stages = db.relationship('ProjectStage', back_populates='project', lazy=True)
     updates = db.relationship('ProjectUpdate', back_populates='project')
 
-
-# 项目文件表
-class ProjectFile(db.Model):
-    __tablename__ = 'project_files'
-
-    id = db.Column(db.Integer, primary_key=True)
-    file_name = db.Column(db.String(255), nullable=False)
-    file_type = db.Column(db.String(50))
-    file_url = db.Column(db.String(255))
-    file_size = db.Column(db.Integer)  # in bytes
-    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'))
-    upload_user_id = db.Column(db.Integer, db.ForeignKey('users.id'))
-    upload_date = db.Column(db.DateTime, default=datetime.utcnow)
-
-    upload_user = db.relationship('User', backref='uploaded_files')
-
-
 # 项目阶段表
 class ProjectStage(db.Model):
+    __tablename__ = 'project_stages'
+
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), nullable=False)
     description = db.Column(db.String(200), nullable=False)
@@ -71,17 +51,37 @@ class ProjectStage(db.Model):
     status = db.Column(db.String(20), nullable=False)
     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
 
+    # 关联
     project = db.relationship('Project', back_populates='stages')
+    files = db.relationship('ProjectFile', backref='stage', lazy=True)
 
 # 阶段更新表
 class ProjectUpdate(db.Model):
     __tablename__ = 'project_updates'
 
     id = db.Column(db.Integer, primary_key=True)
-    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)  # Corrected table name
+    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
     progress = db.Column(db.Integer, nullable=False)
     description = db.Column(db.String(255), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     type = db.Column(db.String(50))
 
+    # 关联
     project = db.relationship('Project', back_populates='updates')
+
+# 项目文件表
+class ProjectFile(db.Model):
+    __tablename__ = 'project_files'
+
+    id = db.Column(db.Integer, primary_key=True)
+    original_name = db.Column(db.String(255))  # 新增字段
+    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
+    stage_id = db.Column(db.Integer, db.ForeignKey('project_stages.id'), nullable=False)
+    file_name = db.Column(db.String(255), nullable=False)
+    file_type = db.Column(db.String(100))
+    file_path = db.Column(db.String(255), nullable=False)
+    upload_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    upload_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    # 关联 - 移除重复的关系定义
+    upload_user = db.relationship('User', backref='uploaded_files')

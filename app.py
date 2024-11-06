@@ -4,6 +4,7 @@ from flask import request, jsonify, redirect, url_for
 import jwt
 import datetime
 from models import User, Project
+from routes.filemanagement import files_bp
 from routes.leaders import leader_bp
 from routes.employees import employee_bp
 from routes.projectplan import projectplan_bp
@@ -13,6 +14,7 @@ app.register_blueprint(employee_bp, url_prefix='/api/employee')
 
 app.register_blueprint(projectplan_bp, url_prefix='/api/projectplan')
 
+app.register_blueprint(files_bp, url_prefix='/api')
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -56,14 +58,6 @@ def register():
     db.session.commit()
 
     return jsonify({'message': '用户注册成功'}), 201
-
-
-
-# @app.errorhandler(jwt.exceptions.ExpiredSignatureError)
-# def handle_expired_token(error):
-#     return redirect('/login')  # 将 'login' 调整为实际的登录路由端点
-
-
 
 
 

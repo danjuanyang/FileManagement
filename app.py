@@ -29,14 +29,19 @@ def login():
             'user_id': user.id,
             'username': user.username,
             'role': user.role,
-            'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=1)
+            'exp': datetime.datetime.now() + datetime.timedelta(hours=1)
         }, app.config['SECRET_KEY'], algorithm='HS256')
 
         return jsonify({
             'token': token,
             'role': user.role,
             'username': user.username,
-            'user_id': user.id
+            'user_id': user.id,
+            # 当前时间,返回时分秒
+            'now': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            # 过期时间
+            'exp': datetime.datetime.now() + datetime.timedelta(hours=1)
+
         }), 200
 
     return jsonify({'message': '用户名或密码无效'}), 401
@@ -58,9 +63,6 @@ def register():
     db.session.commit()
 
     return jsonify({'message': '用户注册成功'}), 201
-
-
-
 
 
 if __name__ == '__main__':

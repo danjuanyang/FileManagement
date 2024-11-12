@@ -1,5 +1,3 @@
-
-
 # router/employees.py
 from datetime import datetime
 from functools import wraps
@@ -22,7 +20,8 @@ def get_employee_id():
     data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
     return data['user_id']
 
-#工程查看和编辑路线
+
+# 工程查看和编辑路线
 @employee_bp.route('/projects', methods=['GET'])
 def get_assigned_projects():
     employee_id = get_employee_id()
@@ -61,7 +60,6 @@ def update_project(project_id):
     return jsonify({'message': '项目更新成功'})
 
 
-
 # 文件上传、编辑和删除
 @employee_bp.route('/projects/<int:project_id>/files', methods=['POST'])
 def upload_file(project_id):
@@ -81,7 +79,6 @@ def upload_file(project_id):
     file.save(f'uploads/{file.filename}')
 
     return jsonify({'message': '文件上传成功'})
-
 
 
 # 获取文件并显示
@@ -201,6 +198,7 @@ def update_project_progress(project_id):
         'update_id': new_update.id
     })
 
+
 # ---------------------------------
 # 上传
 @employee_bp.route('/projects/<int:project_id>/stages/<int:stage_id>/upload', methods=['POST'])
@@ -259,7 +257,9 @@ def token_required(f):
             return jsonify({'message': '无效的token'}), 401
 
         return f(current_user, *args, **kwargs)
+
     return decorated
+
 
 # 获取用户个人信息接口
 @employee_bp.route('/profile', methods=['GET'])
@@ -270,5 +270,4 @@ def get_profile(current_user):
         'username': current_user.username,
         'role': current_user.role,
         'name': current_user.name if hasattr(current_user, 'name') else current_user.username,
-        # 可以添加更多用户信息字段
     }), 200

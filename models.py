@@ -1,8 +1,10 @@
+# models.py
 from datetime import datetime
 import bcrypt
 from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
+
 
 # 用户表
 class User(db.Model):
@@ -18,6 +20,7 @@ class User(db.Model):
 
     def check_password(self, password):
         return bcrypt.checkpw(password.encode('utf-8'), self.password_hash.encode('utf-8'))
+
 
 # 项目表
 class Project(db.Model):
@@ -38,7 +41,9 @@ class Project(db.Model):
     stages = db.relationship('ProjectStage', back_populates='project', lazy=True)
     updates = db.relationship('ProjectUpdate', back_populates='project')
 
+
 # 项目阶段表
+# 更新 ProjectStage 模型以包含任务关系
 class ProjectStage(db.Model):
     __tablename__ = 'project_stages'
 
@@ -51,9 +56,11 @@ class ProjectStage(db.Model):
     status = db.Column(db.String(20), nullable=False)
     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
 
-    # 关联
+    # 关系
     project = db.relationship('Project', back_populates='stages')
     files = db.relationship('ProjectFile', backref='stage', lazy=True)
+    tasks = db.relationship('StageTask', back_populates='stage', lazy=True)
+
 
 # 阶段更新表
 class ProjectUpdate(db.Model):
@@ -68,6 +75,7 @@ class ProjectUpdate(db.Model):
 
     # 关联
     project = db.relationship('Project', back_populates='updates')
+
 
 # 项目文件表
 class ProjectFile(db.Model):
@@ -85,3 +93,22 @@ class ProjectFile(db.Model):
 
     # 关联 - 移除重复的关系定义
     upload_user = db.relationship('User', backref='uploaded_files')
+
+
+# 阶段任务表
+class StageTask(db.Model):
+    __tablename__ = 'stage_tasks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    stage_id = db.Column(db.Integer, db.ForeignKey('project_stages.id'), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text)
+    due_date = db.Column(db.Date, nullable=False)
+    status = db.Column(db.String(20), default='pending')  # 待处理、正在进行、已完成
+    progress = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # 关系
+    stage = db.relationship('ProjectStage', back_populates='tasks')
+

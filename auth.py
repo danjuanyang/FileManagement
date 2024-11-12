@@ -8,12 +8,3 @@ def get_employee_id():
     token = request.headers.get('Authorization').split()[1]
     data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
     return data['user_id']
-
-
-# def get_employee_id():
-#     token = request.cookies.get('token')
-#     try:
-#         data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
-#         return data['user_id']
-#     except jwt.ExpiredSignatureError:
-#         return redirect('/login')  # Adjust the URL to match your frontend login page

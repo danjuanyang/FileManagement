@@ -166,47 +166,6 @@ def get_employees():
 
 # 查看单个项目所有信息，此处请求为project没有s
 # 查看单个项目所有信息
-# @leader_bp.route('/project/<int:project_id>', methods=['GET'])
-# def get_project_details(project_id):
-#     try:
-#         # 检索项目
-#         project = Project.query.get_or_404(project_id)
-#
-#         # 检索与项目相关的阶段
-#         stages = ProjectStage.query.filter_by(project_id=project_id).all()
-#
-#         # 准备响应数据
-#         project_data = {
-#             'id': project.id,
-#             'name': project.name,
-#             'description': project.description,
-#             'start_date': project.start_date.strftime('%Y-%m-%d') if project.start_date else None,
-#             'deadline': project.deadline.strftime('%Y-%m-%d') if project.deadline else None,
-#             'progress': project.progress,
-#             'status': project.status,
-#             'stages': []
-#         }
-#         for stage in stages:
-#             # 检索与阶段相关的任务
-#             tasks = StageTask.query.filter_by(stage_id=stage.id).all()
-#
-#             stage_data = {
-#                 'id': stage.id,
-#                 'name': stage.name,
-#                 'edit_time': stage.edit_time.strftime('%Y-%m-%d %H:%M:%S') if stage.edit_time else None,
-#                 'tasks': [{
-#                     'id': task.id,
-#                     'name': task.name,
-#                     'status': task.status,
-#                     'assigned_to': task.assigned_to.username if task.assigned_to else None
-#                 } for task in tasks]
-#             }
-#             project_data['stages'].append(stage_data)
-#         return jsonify(project_data)
-#     except Exception as e:
-#         return jsonify({'error': str(e)}), 500
-
-
 @leader_bp.route('/project/<int:project_id>', methods=['GET'])
 def get_project_details(project_id):
     try:

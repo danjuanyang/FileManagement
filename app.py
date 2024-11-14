@@ -16,6 +16,8 @@ app.register_blueprint(projectplan_bp, url_prefix='/api/projectplan')
 
 app.register_blueprint(files_bp, url_prefix='/api')
 
+
+# 用户登录接口
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -29,7 +31,7 @@ def login():
             'user_id': user.id,
             'username': user.username,
             'role': user.role,
-            'exp': datetime.datetime.now() + datetime.timedelta(hours=1)
+            'exp': datetime.datetime.now() + datetime.timedelta(minutes=1)
         }, app.config['SECRET_KEY'], algorithm='HS256')
 
         return jsonify({
@@ -40,12 +42,13 @@ def login():
             # 当前时间,返回时分秒
             'now': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             # 过期时间
-            'exp': datetime.datetime.now() + datetime.timedelta(hours=1)
+            'exp': datetime.datetime.now() + datetime.timedelta(minutes=1)
 
         }), 200
-
     return jsonify({'message': '用户名或密码无效'}), 401
 
+
+# 用户注册接口
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.get_json()

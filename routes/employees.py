@@ -271,3 +271,34 @@ def get_profile(current_user):
         'role': current_user.role,
         'name': current_user.name if hasattr(current_user, 'name') else current_user.username,
     }), 200
+
+
+# 填报补卡功能接口
+@employee_bp.route('/fill-card', methods=['POST'])
+@token_required
+def report_clock_in(current_user):
+    data = request.get_json()
+    dates = data.get('dates', [])
+
+    if len(dates) > 3:
+        return jsonify({'error': '最多只能选择3天'}), 400
+
+    reported_dates = []
+    for date_str in dates:
+        try:
+            date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+            weekday = date_obj.strftime('%A')  #获取工作日名称
+            reported_dates.append({
+                'date': date_str,
+                'weekday': weekday
+            })
+        except ValueError:
+            return jsonify({'error': f'无效的日期格式: {date_str}'}), 400
+
+    return jsonify({
+        'employee_id': current_user.id,
+        # 返回当前时间
+        'date': datetime.now().strftime('%Y-%m-%d'),
+        'employee_name': current_user.name if hasattr(current_user, 'name') else current_user.username,
+        'reported_dates': reported_dates
+    }), 200

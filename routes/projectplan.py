@@ -2,14 +2,12 @@
 from datetime import datetime
 from flask import Blueprint, request, jsonify
 from flask_cors import CORS
-from models import db, ProjectStage, StageTask
+from models import db, ProjectStage, StageTask, EditTimeTracking
 from auth import get_employee_id
 
 projectplan_bp = Blueprint('projectplan', __name__)
 CORS(projectplan_bp)  # 为此蓝图启用 CORS
 CORS(projectplan_bp, resources={r"/api/*": {"origins": "*"}})  # 根据需要调整路径
-
-
 
 
 # 获取包含任务的项目阶段
@@ -36,9 +34,28 @@ def get_project_stages(project_id):
 
 
 # 创建项目阶段
+# @projectplan_bp.route('/stages', methods=['POST'])
+# def create_project_stage():
+#     data = request.get_json()
+#     stage = ProjectStage(
+#         name=data['name'],
+#         description=data['description'],
+#         start_date=datetime.strptime(data['startDate'], '%Y-%m-%d'),
+#         end_date=datetime.strptime(data['endDate'], '%Y-%m-%d'),
+#         progress=data['progress'],
+#         status=data['status'],
+#         project_id=data['projectId']
+#     )
+#     db.session.add(stage)
+#     db.session.commit()
+#     return jsonify({'message': '阶段创建成功'}), 201
+
+
 @projectplan_bp.route('/stages', methods=['POST'])
 def create_project_stage():
     data = request.get_json()
+    tracking_id = data.pop('trackingId', None)
+
     stage = ProjectStage(
         name=data['name'],
         description=data['description'],
@@ -48,9 +65,18 @@ def create_project_stage():
         status=data['status'],
         project_id=data['projectId']
     )
+
     db.session.add(stage)
+
+    if tracking_id:
+        tracking = EditTimeTracking.query.get(tracking_id)
+        if tracking:
+            tracking.end_time = datetime.utcnow()
+            tracking.duration = int((tracking.end_time - tracking.start_time).total_seconds())
+            tracking.stage_id = stage.id
+
     db.session.commit()
-    return jsonify({'message': '阶段创建成功'}), 201
+    return jsonify({'message': '阶段创建成功', 'stageId': stage.id}), 201
 
 
 # 更新项目阶段
@@ -80,9 +106,30 @@ def delete_project_stage(id):
 
 # -------------------
 # 为阶段创建任务
+# @projectplan_bp.route('/stages/<int:stage_id>/tasks', methods=['POST'])
+# def create_stage_task(stage_id):
+#     data = request.get_json()
+#     task = StageTask(
+#         stage_id=stage_id,
+#         name=data['name'],
+#         description=data.get('description', ''),
+#         due_date=datetime.strptime(data['dueDate'], '%Y-%m-%d'),
+#         status=data.get('status', 'pending'),
+#         progress=data.get('progress', 0)
+#     )
+#     db.session.add(task)
+#     db.session.commit()
+#
+#     # 根据任务更新阶段进度
+#     update_stage_progress(stage_id)
+#
+#     return jsonify({'message': '任务创建成功', 'id': task.id}), 201
+
 @projectplan_bp.route('/stages/<int:stage_id>/tasks', methods=['POST'])
 def create_stage_task(stage_id):
     data = request.get_json()
+    tracking_id = data.pop('trackingId', None)
+
     task = StageTask(
         stage_id=stage_id,
         name=data['name'],
@@ -91,12 +138,18 @@ def create_stage_task(stage_id):
         status=data.get('status', 'pending'),
         progress=data.get('progress', 0)
     )
+
     db.session.add(task)
+
+    if tracking_id:
+        tracking = EditTimeTracking.query.get(tracking_id)
+        if tracking:
+            tracking.end_time = datetime.utcnow()
+            tracking.duration = int((tracking.end_time - tracking.start_time).total_seconds())
+            tracking.task_id = task.id
+
     db.session.commit()
-
-    # 根据任务更新阶段进度
     update_stage_progress(stage_id)
-
     return jsonify({'message': '任务创建成功', 'id': task.id}), 201
 
 
@@ -153,7 +206,6 @@ def update_stage_progress(stage_id):
     db.session.commit()
 
 
-
 # 导出项目计划，包含所有阶段和任务
 @projectplan_bp.route('/projects/<int:project_id>/export', methods=['GET'])
 def export_project_plan(project_id):
@@ -176,3 +228,35 @@ def export_project_plan(project_id):
         } for task in stage.tasks]
     } for stage in stages])
 
+
+# 追踪编辑时间
+@projectplan_bp.route('/tracking/start', methods=['POST'])
+def start_edit_tracking():
+    data = request.get_json()
+    user_id = get_employee_id()
+
+    tracking = EditTimeTracking(
+        project_id=data['projectId'],
+        user_id=user_id,
+        edit_type=data['editType'],
+        start_time=datetime.utcnow(),
+        end_time=datetime.utcnow(),  # 将在编辑结束时更新
+        duration=0,  # 将在编辑结束时计算
+        stage_id=data.get('stageId'),
+        task_id=data.get('taskId')
+    )
+
+    db.session.add(tracking)
+    db.session.commit()
+
+    return jsonify({'id': tracking.id}), 201
+
+
+@projectplan_bp.route('/tracking/end/<int:tracking_id>', methods=['PUT'])
+def end_edit_tracking(tracking_id):
+    tracking = EditTimeTracking.query.get_or_404(tracking_id)
+    tracking.end_time = datetime.utcnow()
+    tracking.duration = int((tracking.end_time - tracking.start_time).total_seconds())
+
+    db.session.commit()
+    return jsonify({'message': 'Tracking ended successfully'}), 200

@@ -1,7 +1,7 @@
 # routes/leaders.py
 from flask import Blueprint, request, jsonify
 from flask_cors import CORS
-from models import db, Project, ProjectFile, User
+from models import db, Project, ProjectFile, User, StageTask, ProjectStage, EditTimeTracking
 from datetime import datetime
 
 leader_bp = Blueprint('leader', __name__)
@@ -40,7 +40,6 @@ def get_projects():
     })
 
 
-
 # 创建项目
 @leader_bp.route('/projects', methods=['POST'])
 def create_project():
@@ -68,7 +67,6 @@ def create_project():
         'message': '项目创建成功',
         'project_id': project.id
     }), 201
-
 
 
 # 更新项目
@@ -101,7 +99,6 @@ def update_project(project_id):
                 else:
                     processed_value = update_handlers[key](value)
                     setattr(project, key, processed_value)
-
         db.session.commit()
         return jsonify({
             'message': '项目更新成功',
@@ -119,7 +116,6 @@ def update_project(project_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
-
 
 
 # 查看项目文件
@@ -155,6 +151,7 @@ def search_files():
         } for f in files]
     })
 
+
 # 获取所有员工列表
 @leader_bp.route('/employees', methods=['GET'])
 def get_employees():
@@ -165,3 +162,110 @@ def get_employees():
             'username': e.username
         } for e in employees]
     })
+
+
+# 查看单个项目所有信息，此处请求为project没有s
+# 查看单个项目所有信息
+# @leader_bp.route('/project/<int:project_id>', methods=['GET'])
+# def get_project_details(project_id):
+#     try:
+#         # 检索项目
+#         project = Project.query.get_or_404(project_id)
+#
+#         # 检索与项目相关的阶段
+#         stages = ProjectStage.query.filter_by(project_id=project_id).all()
+#
+#         # 准备响应数据
+#         project_data = {
+#             'id': project.id,
+#             'name': project.name,
+#             'description': project.description,
+#             'start_date': project.start_date.strftime('%Y-%m-%d') if project.start_date else None,
+#             'deadline': project.deadline.strftime('%Y-%m-%d') if project.deadline else None,
+#             'progress': project.progress,
+#             'status': project.status,
+#             'stages': []
+#         }
+#         for stage in stages:
+#             # 检索与阶段相关的任务
+#             tasks = StageTask.query.filter_by(stage_id=stage.id).all()
+#
+#             stage_data = {
+#                 'id': stage.id,
+#                 'name': stage.name,
+#                 'edit_time': stage.edit_time.strftime('%Y-%m-%d %H:%M:%S') if stage.edit_time else None,
+#                 'tasks': [{
+#                     'id': task.id,
+#                     'name': task.name,
+#                     'status': task.status,
+#                     'assigned_to': task.assigned_to.username if task.assigned_to else None
+#                 } for task in tasks]
+#             }
+#             project_data['stages'].append(stage_data)
+#         return jsonify(project_data)
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
+
+
+@leader_bp.route('/project/<int:project_id>', methods=['GET'])
+def get_project_details(project_id):
+    try:
+        # 检索项目
+        project = Project.query.get_or_404(project_id)
+
+        # 检索与项目相关的阶段
+        stages = ProjectStage.query.filter_by(project_id=project_id).all()
+
+        # 准备响应数据
+        project_data = {
+            'id': project.id,
+            'name': project.name,
+            'description': project.description,
+            'employee': project.employee.username if project.employee else None,
+            'start_date': project.start_date.strftime('%Y-%m-%d') if project.start_date else None,
+            'deadline': project.deadline.strftime('%Y-%m-%d') if project.deadline else None,
+            'progress': project.progress,
+            'status': project.status,
+            'stages': []
+        }
+
+        for stage in stages:
+            # 检索与阶段相关的任务
+            tasks = StageTask.query.filter_by(stage_id=stage.id).all()
+
+            # 检索阶段的编辑时间跟踪
+            stage_tracking = EditTimeTracking.query.filter_by(stage_id=stage.id, edit_type='stage').first()
+            stage_edit_time = stage_tracking.duration if stage_tracking else None
+
+            stage_data = {
+                'id': stage.id,
+                'name': stage.name,
+                'tracking_edit_time': stage_edit_time,
+                'tasks': []
+            }
+            for task in tasks:
+                # 检索任务的编辑时间跟踪
+                task_tracking = EditTimeTracking.query.filter_by(task_id=task.id, edit_type='task').first()
+                task_edit_time = task_tracking.duration if task_tracking else None
+
+                task_data = {
+                    'id': task.id,
+                    'name': task.name,
+                    'description': task.description,
+                    'employee': project.employee.username if project.employee else None,
+                    'due_date': task.due_date.strftime('%Y-%m-%d') if task.due_date else None,
+                    'status': task.status,
+                    'progress': task.progress,
+                    'created_at': task.created_at.strftime('%Y-%m-%d %H:%M:%S') if task.created_at else None,
+                    'updated_at': task.updated_at.strftime('%Y-%m-%d %H:%M:%S') if task.updated_at else None,
+                    'tracking_edit_time': task_edit_time
+                }
+
+                stage_data['tasks'].append(task_data)
+
+            project_data['stages'].append(stage_data)
+
+        return jsonify(project_data)
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

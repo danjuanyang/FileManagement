@@ -1,8 +1,11 @@
 # routes/leaders.py
 from flask import Blueprint, request, jsonify
 from flask_cors import CORS
-from models import db, Project, ProjectFile, User, StageTask, ProjectStage, EditTimeTracking
+from models import db, Project, ProjectFile, User, StageTask, ProjectStage, EditTimeTracking, ReportClockinDetail, \
+    ReportClockin
 from datetime import datetime
+
+from routes.employees import token_required
 
 leader_bp = Blueprint('leader', __name__)
 CORS(leader_bp)
@@ -226,5 +229,69 @@ def get_project_details(project_id):
 
         return jsonify(project_data)
 
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@leader_bp.route('/report-clockin-data', methods=['GET'])
+@token_required
+def get_report_clockin_data(current_user):
+    if  current_user.role != 1:
+        return jsonify({'error': '权限不足'}), 403
+
+    # 获取查询参数
+    month = request.args.get('month')  # 格式：YYYY-MM
+
+    try:
+        if month:
+            date = datetime.strptime(month, '%Y-%m')
+            start_date = datetime(date.year, date.month, 1)
+            if date.month == 12:
+                end_date = datetime(date.year + 1, 1, 1)
+            else:
+                end_date = datetime(date.year, date.month + 1, 1)
+        else:
+            # 默认显示当月
+            today = datetime.now()
+            start_date = datetime(today.year, today.month, 1)
+            if today.month == 12:
+                end_date = datetime(today.year + 1, 1, 1)
+            else:
+                end_date = datetime(today.year, today.month + 1, 1)
+
+        # 查询补卡记录
+        reports = db.session.query(
+            ReportClockin,
+            User
+        ).join(
+            User,
+            ReportClockin.employee_id == User.id
+        ).filter(
+            ReportClockin.report_date >= start_date,
+            ReportClockin.report_date < end_date
+        ).all()
+
+        # 整理数据
+        result = []
+        for report, user in reports:
+            # 获取补卡详情
+            details = ReportClockinDetail.query.filter_by(report_id=report.id).all()
+
+            result.append({
+                'report_id': report.id,
+                'employee_id': user.id,
+                'employee_name': user.name if hasattr(user, 'name') else user.username,
+                'report_date': report.report_date.strftime('%Y-%m-%d %H:%M:%S'),
+                'dates': [{
+                    'date': detail.clockin_date.strftime('%Y-%m-%d'),
+                    'weekday': detail.weekday
+                } for detail in details]
+            })
+        return jsonify({
+            'data': result,
+            'total': len(result)
+        })
+    except ValueError:
+        return jsonify({'error': '无效的日期格式'}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 500

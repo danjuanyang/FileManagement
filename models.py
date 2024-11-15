@@ -132,3 +132,42 @@ class EditTimeTracking(db.Model):
     user = db.relationship('User', backref='edit_tracks')
     stage = db.relationship('ProjectStage', backref='edit_tracks')
     task = db.relationship('StageTask', backref='edit_tracks')
+
+# 补卡记录表
+class ReportClockin(db.Model):
+    __tablename__ = 'report_clockins'
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    report_date = db.Column(db.DateTime, nullable=False, default=datetime.now())
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now())
+
+    # 关联
+    employee = db.relationship('User', backref='report_clockins')
+    details = db.relationship('ReportClockinDetail', backref='report', cascade='all, delete-orphan')
+
+    @classmethod
+    def has_reported_this_month(cls, employee_id):
+        """检查用户本月是否已经提交过补卡申请"""
+        today = datetime.now()
+        start_of_month = datetime(today.year, today.month, 1)
+        end_of_month = datetime(today.year, today.month + 1, 1) if today.month < 12 else datetime(today.year + 1, 1, 1)
+
+        return db.session.query(cls).filter(
+            cls.employee_id == employee_id,
+            cls.report_date >= start_of_month,
+            cls.report_date < end_of_month
+        ).first() is not None
+
+
+
+# 补卡明细表
+class ReportClockinDetail(db.Model):
+    __tablename__ = 'report_clockin_details'
+
+    id = db.Column(db.Integer, primary_key=True)
+    report_id = db.Column(db.Integer, db.ForeignKey('report_clockins.id'), nullable=False)
+    clockin_date = db.Column(db.Date, nullable=False)  # 补卡日期
+    weekday = db.Column(db.String(20), nullable=False)  # 星期几
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now())
+

@@ -1,7 +1,7 @@
+# filemanagement.py
+from flask import Blueprint
+from flask_cors import CORS
 from datetime import datetime
-from functools import wraps
-# from operator import or_
-
 import jwt
 from sqlalchemy import or_
 from sqlalchemy.orm import joinedload
@@ -12,90 +12,98 @@ from flask import jsonify, request
 import os
 from models import db, Project, ProjectFile, ProjectStage, User
 from auth import get_employee_id
-from routes.employees import token_required, get_profile
 
 UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'doc', 'docx', 'pdf', 'xls', 'xlsx', 'txt', 'zip', 'rar'}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+BASE_UPLOAD_FOLDER = 'uploads'  # 基础上传目录
 
 files_bp = Blueprint('files', __name__)
 CORS(files_bp)
 
 
+
 def get_user_display_name(user):
-    """
-    获取用户显示名称
-    根据实际的User模型字段返回合适的显示名称
-    """
-    # 根据User模型实际字段修改这里
-    # 按优先级尝试不同的字段
+    """获取用户显示名称"""
     if hasattr(user, 'username'):
         return user.username
     elif hasattr(user, 'name'):
         return user.name
-    elif hasattr(user, 'employee_name'):
-        return user.employee_name
-    elif hasattr(user, 'email'):
-        return user.email
-    else:
-        return f"User_{user.id}" if hasattr(user, 'id') else "Unknown User"
+    return f"User_{user.id}" if hasattr(user, 'id') else "Unknown User"
 
 
 def allowed_file(filename):
+    """检查文件类型是否允许"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def create_upload_folder():
-    if not os.path.exists(UPLOAD_FOLDER):
-        os.makedirs(UPLOAD_FOLDER)
+def get_upload_path(user_name, project_name, stage_name):
+    """生成上传路径"""
+    # 移除文件名中的非法字符
+    safe_user = secure_filename(user_name)
+    safe_project = secure_filename(project_name)
+    safe_stage = secure_filename(stage_name)
+
+    # 构建路径
+    path = os.path.join(BASE_UPLOAD_FOLDER, safe_user, safe_project, safe_stage)
+
+    # 确保目录存在
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    return path
 
 
-def generate_secure_filename(original_filename):
-    """
-    生成安全的文件名，保留原始文件名的信息
-    """
-    # 获取文件名和扩展名
-    name, ext = os.path.splitext(original_filename)
-
-    # 使用secure_filename处理文件名
-    secure_name = secure_filename(name)
-
-    # 如果secure_filename处理后为空，使用时间戳作为文件名
-    if not secure_name:
-        secure_name = datetime.now().strftime('%Y%m%d_%H%M%S')
-
-    # 生成最终的文件名
-    final_filename = secure_name + ext.lower()
-
-    # 如果文件已存在，添加时间戳
-    if os.path.exists(os.path.join(UPLOAD_FOLDER, final_filename)):
-        final_filename = f"{secure_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext.lower()}"
-
-    return final_filename
+def check_stage_progress(stage_id):
+    """检查阶段进度是否达到100%"""
+    stage = ProjectStage.query.get(stage_id)
+    if not stage:
+        return False
+    return stage.progress >= 100
 
 
+# 添加新的路由来处理stage文件获取
 @files_bp.route('/files/stage/<int:stage_id>', methods=['GET'])
 def get_stage_files(stage_id):
     try:
         files = ProjectFile.query.filter_by(stage_id=stage_id).all()
-        return jsonify([{
-            'id': file.id,
-            'fileName': file.file_name,
-            'originalName': file.original_name,  # 添加原始文件名字段
-            'fileSize': os.path.getsize(os.path.join(UPLOAD_FOLDER, file.file_name)) if os.path.exists(
-                os.path.join(UPLOAD_FOLDER, file.file_name)) else 0,
-            'uploadTime': file.upload_date.isoformat(),
-            'uploader': get_user_display_name(file.upload_user),
-            'fileType': file.file_type,
-            'projectName': file.project.name
-        } for file in files])
+        files_data = []
+
+        for file in files:
+            # 获取上传用户信息
+            uploader = User.query.get(file.upload_user_id)
+            uploader_name = get_user_display_name(uploader)
+
+            # 获取文件大小
+            try:
+                file_size = os.path.getsize(file.file_path) if os.path.exists(file.file_path) else 0
+            except:
+                file_size = 0
+
+            files_data.append({
+                'id': file.id,
+                'fileName': file.file_name,
+                'originalName': file.original_name,
+                'fileSize': file_size,
+                'uploadTime': file.upload_date.isoformat(),
+                'uploader': uploader_name
+            })
+
+        return jsonify(files_data)
+
     except Exception as e:
+        print(f"Error getting stage files: {str(e)}")  # 添加日志记录
         return jsonify({'error': str(e)}), 500
+
 
 
 @files_bp.route('/files/upload/<int:stage_id>', methods=['POST'])
 def upload_file(stage_id):
     try:
+        # 检查阶段进度
+        if not check_stage_progress(stage_id):
+            return jsonify({'error': '当前阶段未完成，无法上传文件'}), 403
+
         if 'file' not in request.files:
             return jsonify({'error': '没有文件'}), 400
 
@@ -109,35 +117,42 @@ def upload_file(stage_id):
         # 检查文件大小
         file.seek(0, os.SEEK_END)
         file_size = file.tell()
-        file.seek(0)  # 重置文件指针到开始位置
+        file.seek(0)
 
         if file_size > MAX_FILE_SIZE:
             return jsonify({'error': '文件大小超过限制'}), 400
 
-        # 保存原始文件名
-        original_filename = file.filename
-        # 生成安全的文件名
-        secure_filename = generate_secure_filename(original_filename)
+        # 获取必要信息
+        stage = ProjectStage.query.get_or_404(stage_id)
+        project = Project.query.get_or_404(stage.project_id)
+        user = User.query.get_or_404(get_employee_id())
 
-        create_upload_folder()
+        # 生成上传路径
+        upload_path = get_upload_path(user.username, project.name, stage.name)
+
+        # 保持原始文件名，但处理同名文件
+        original_filename = file.filename
+        final_filename = original_filename
+        base_name, extension = os.path.splitext(original_filename)
+        counter = 1
+
+        while os.path.exists(os.path.join(upload_path, final_filename)):
+            final_filename = f"{base_name}({counter}){extension}"
+            counter += 1
 
         # 保存文件
-        file_path = os.path.join(UPLOAD_FOLDER, secure_filename)
+        file_path = os.path.join(upload_path, final_filename)
         file.save(file_path)
-
-        # 获取项目ID和用户
-        stage = ProjectStage.query.get_or_404(stage_id)
-        user_id = get_employee_id()
 
         # 创建文件记录
         file_record = ProjectFile(
-            project_id=stage.project_id,
+            project_id=project.id,
             stage_id=stage_id,
-            file_name=secure_filename,  # 保存安全文件名
-            original_name=original_filename,  # 保存原始文件名
+            file_name=final_filename,
+            original_name=original_filename,
             file_type=file.content_type,
             file_path=file_path,
-            upload_user_id=user_id,
+            upload_user_id=user.id,
             upload_date=datetime.now()
         )
 
@@ -150,14 +165,14 @@ def upload_file(stage_id):
                 'id': file_record.id,
                 'fileName': file_record.file_name,
                 'originalName': file_record.original_name,
-                'fileSize': os.path.getsize(file_path),
+                'fileSize': file_size,
                 'uploadTime': file_record.upload_date.isoformat(),
                 'uploader': get_user_display_name(file_record.upload_user)
             }
         })
 
     except Exception as e:
-        # 如果出现错误，清理已上传的文件
+        # 清理已上传的文件
         if 'file_path' in locals() and os.path.exists(file_path):
             try:
                 os.remove(file_path)
@@ -170,17 +185,14 @@ def upload_file(stage_id):
 def download_file(file_id):
     try:
         file_record = ProjectFile.query.get_or_404(file_id)
-        file_path = os.path.join(UPLOAD_FOLDER, file_record.file_name)
-
-        if not os.path.exists(file_path):
+        if not os.path.exists(file_record.file_path):
             return jsonify({'error': '文件不存在'}), 404
 
         return send_file(
-            file_path,
+            file_record.file_path,
             as_attachment=True,
-            download_name=file_record.original_name  # 使用原始文件名作为下载文件名
+            download_name=file_record.original_name
         )
-
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -194,11 +206,18 @@ def delete_file(file_id):
         if file_record.upload_user_id != get_employee_id():
             return jsonify({'error': '没有权限删除此文件'}), 403
 
-        file_path = os.path.join(UPLOAD_FOLDER, file_record.file_name)
-
         # 删除物理文件
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        if os.path.exists(file_record.file_path):
+            os.remove(file_record.file_path)
+
+            # 检查并删除空文件夹
+            directory = os.path.dirname(file_record.file_path)
+            while directory != BASE_UPLOAD_FOLDER:
+                if not os.listdir(directory):
+                    os.rmdir(directory)
+                    directory = os.path.dirname(directory)
+                else:
+                    break
 
         # 删除数据库记录
         db.session.delete(file_record)
@@ -208,7 +227,6 @@ def delete_file(file_id):
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
 
 def get_user_info_from_token():
     """
@@ -241,6 +259,7 @@ def get_user_info_from_token():
     except Exception as e:
         print(f"Unexpected error in token processing: {str(e)}")
         return None
+
 
 
 @files_bp.route('/files/search', methods=['GET'])

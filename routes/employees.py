@@ -7,7 +7,7 @@ from flask import Blueprint, request, jsonify
 from flask_cors import CORS
 
 from config import app
-from models import db, Project, ProjectFile, ProjectUpdate, ProjectStage, User
+from models import db, Project, ProjectFile, ProjectUpdate, ProjectStage, User, ReportClockinDetail, ReportClockin
 from auth import get_employee_id
 
 employee_bp = Blueprint('employee', __name__)
@@ -183,7 +183,7 @@ def update_project_progress(project_id):
         project_id=project_id,
         progress=data['progress'],
         description=data['description'],
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(),
         type='progress'
     )
 
@@ -274,31 +274,163 @@ def get_profile(current_user):
 
 
 # 填报补卡功能接口
+# @employee_bp.route('/fill-card', methods=['POST'])
+# @token_required
+# def report_clock_in(current_user):
+#     data = request.get_json()
+#     dates = data.get('dates', [])
+#
+#     if len(dates) > 3:
+#         return jsonify({'error': '最多只能选择3天'}), 400
+#
+#     try:
+#         # 创建补卡记录
+#         report = ReportClockin(
+#             employee_id=current_user.id,
+#             report_date=datetime.now()
+#         )
+#         db.session.add(report)
+#         # 先提交以获取report_id
+#         db.session.flush()
+#
+#         # 添加补卡明细
+#         reported_dates = []
+#         for date_str in dates:
+#             try:
+#                 date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+#                 weekday = date_obj.strftime('%A')
+#
+#                 # 创建明细记录
+#                 detail = ReportClockinDetail(
+#                     report_id=report.id,
+#                     clockin_date=date_obj.date(),
+#                     weekday=weekday
+#                 )
+#                 db.session.add(detail)
+#
+#                 reported_dates.append({
+#                     'date': date_str,
+#                     'weekday': weekday
+#                 })
+#             except ValueError:
+#                 db.session.rollback()
+#                 return jsonify({'error': f'无效的日期格式: {date_str}'}), 400
+#
+#         # 最后提交所有更改
+#         db.session.commit()
+#         return jsonify({
+#             'message': '补卡申请提交成功',
+#             'report_id': report.id,
+#             'employee_id': current_user.id,
+#             'employee_name': current_user.name if hasattr(current_user, 'name') else current_user.username,
+#             'reported_dates': reported_dates
+#         }), 200
+#
+#     except Exception as e:
+#         db.session.rollback()
+#         return jsonify({'error': str(e)}), 500
+
+
+# 后端接口 - 添加检查当月是否已填报的接口
+@employee_bp.route('/check-monthly-report', methods=['GET'])
+@token_required
+def check_monthly_report(current_user):
+    has_reported = ReportClockin.has_reported_this_month(current_user.id)
+    return jsonify({
+        'has_reported': has_reported,
+        'month': datetime.now().strftime('%Y-%m'),
+    })
+
+
+# 修改提交接口，添加验证
 @employee_bp.route('/fill-card', methods=['POST'])
 @token_required
 def report_clock_in(current_user):
+    # 先检查是否已经提交过
+    if ReportClockin.has_reported_this_month(current_user.id):
+        return jsonify({
+            'error': '本月已提交过补卡申请，不能重复提交',
+        }), 400
+
     data = request.get_json()
     dates = data.get('dates', [])
 
     if len(dates) > 3:
         return jsonify({'error': '最多只能选择3天'}), 400
 
-    reported_dates = []
-    for date_str in dates:
-        try:
-            date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-            weekday = date_obj.strftime('%A')  #获取工作日名称
-            reported_dates.append({
-                'date': date_str,
-                'weekday': weekday
-            })
-        except ValueError:
-            return jsonify({'error': f'无效的日期格式: {date_str}'}), 400
+    try:
+        # 创建补卡记录
+        report = ReportClockin(
+            employee_id=current_user.id,
+            report_date=datetime.now()
+        )
+        db.session.add(report)
+        db.session.flush()
+
+        # 添加补卡明细
+        reported_dates = []
+        for date_str in dates:
+            try:
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                weekday = date_obj.strftime('%A')
+
+                detail = ReportClockinDetail(
+                    report_id=report.id,
+                    clockin_date=date_obj.date(),
+                    weekday=weekday
+                )
+                db.session.add(detail)
+
+                reported_dates.append({
+                    'date': date_str,
+                    'weekday': weekday
+                })
+            except ValueError:
+                db.session.rollback()
+                return jsonify({'error': f'无效的日期格式: {date_str}'}), 400
+
+        db.session.commit()
+        return jsonify({
+            'message': '补卡提交成功',
+            'report_id': report.id,
+            'employee_id': current_user.id,
+            'employee_name': current_user.name if hasattr(current_user, 'name') else current_user.username,
+            'reported_dates': reported_dates
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# 获取补卡记录
+@employee_bp.route('/report-data', methods=['GET'])
+@token_required
+def get_report_data(current_user):
+    # 获取当前月份的开始和结束时间
+    today = datetime.now()
+    start_of_month = datetime(today.year, today.month, 1)
+    end_of_month = datetime(today.year, today.month + 1, 1) if today.month < 12 else datetime(today.year + 1, 1, 1)
+
+    # 查询本月的补卡记录
+    report = ReportClockin.query.filter(
+        ReportClockin.employee_id == current_user.id,
+        ReportClockin.report_date >= start_of_month,
+        ReportClockin.report_date < end_of_month
+    ).first()
+
+    if not report:
+        return jsonify({'error': '未找到补卡记录'}), 404
+
+    # 获取补卡明细
+    reported_dates = [{
+        'date': detail.clockin_date.strftime('%Y-%m-%d'),
+        'weekday': detail.weekday
+    } for detail in report.details]
 
     return jsonify({
-        'employee_id': current_user.id,
-        # 返回当前时间
-        'date': datetime.now().strftime('%Y-%m-%d'),
+        'report_date': report.report_date,
         'employee_name': current_user.name if hasattr(current_user, 'name') else current_user.username,
+        'employee_id': current_user.id,
         'reported_dates': reported_dates
-    }), 200
+    })

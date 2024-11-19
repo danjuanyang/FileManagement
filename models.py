@@ -1,7 +1,10 @@
 # models.py
 from datetime import datetime
+from typing import Text
+
 import bcrypt
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import Index
 
 db = SQLAlchemy()
 
@@ -93,6 +96,16 @@ class ProjectFile(db.Model):
 
     # 关联 - 移除重复的关系定义
     upload_user = db.relationship('User', backref='uploaded_files')
+    # 添加新字段用于存储文件内容
+    content_text = db.Column(db.Text, nullable=True)
+    # 添加字段表示是否已提取文本
+    text_extracted = db.Column(db.Boolean, default=False)
+
+    # 创建文本内容的全文索引（如果数据库支持）
+    __table_args__ = (
+        Index('idx_file_content', content_text, postgresql_using='gin',
+              postgresql_ops={'content_text': 'gin_trgm_ops'}),
+    )
 
 
 # 阶段任务表
@@ -133,6 +146,7 @@ class EditTimeTracking(db.Model):
     stage = db.relationship('ProjectStage', backref='edit_tracks')
     task = db.relationship('StageTask', backref='edit_tracks')
 
+
 # 补卡记录表
 class ReportClockin(db.Model):
     __tablename__ = 'report_clockins'
@@ -160,7 +174,6 @@ class ReportClockin(db.Model):
         ).first() is not None
 
 
-
 # 补卡明细表
 class ReportClockinDetail(db.Model):
     __tablename__ = 'report_clockin_details'
@@ -170,4 +183,3 @@ class ReportClockinDetail(db.Model):
     clockin_date = db.Column(db.Date, nullable=False)  # 补卡日期
     weekday = db.Column(db.String(20), nullable=False)  # 星期几
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.now())
-

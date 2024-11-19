@@ -1,4 +1,6 @@
 # filemanagement.py
+import re
+
 from flask import Blueprint
 from flask_cors import CORS
 from datetime import datetime
@@ -21,6 +23,83 @@ BASE_UPLOAD_FOLDER = 'uploads'  # 基础上传目录
 files_bp = Blueprint('files', __name__)
 CORS(files_bp)
 
+
+def sanitize_filename(filename):
+    """
+    安全地处理文件名，保留中文字符
+    移除或替换不安全的字符，但保留中文和基本标点
+    """
+    # 替换Windows文件系统中的非法字符
+    illegal_chars = r'[<>:"/\\|?*\x00-\x1f]'
+    # 将非法字符替换为下划线
+    safe_name = re.sub(illegal_chars, '_', filename)
+    # 去除首尾空格和点
+    safe_name = safe_name.strip('. ')
+    # 如果文件名为空，返回默认名称
+    return safe_name or 'unnamed'
+
+
+def allowed_file(filename):
+    """检查文件类型是否允许"""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def get_safe_path_component(component):
+    """
+    安全地处理路径组件名称，保留中文字符
+    """
+    if not component:
+        return 'unnamed'
+    # 使用改进的文件名清理函数
+    return sanitize_filename(component)
+
+
+def get_user_display_name(user):
+    """获取用户显示名称"""
+    if hasattr(user, 'username'):
+        return user.username
+    elif hasattr(user, 'name'):
+        return user.name
+    return f"User_{user.id}" if hasattr(user, 'id') else "Unknown User"
+
+
+def create_upload_path(user_id, project_id, stage_id):
+    """创建并返回上传路径"""
+    try:
+        # 获取必要信息
+        user = User.query.get_or_404(user_id)
+        project = Project.query.get_or_404(project_id)
+        stage = ProjectStage.query.get_or_404(stage_id)
+
+        # 安全地处理各个路径组件，保留中文
+        safe_user = get_safe_path_component(user.username)
+        safe_project = get_safe_path_component(project.name)
+        safe_stage = get_safe_path_component(stage.name)
+
+        # 构建完整路径
+        relative_path = os.path.join(UPLOAD_FOLDER, safe_user, safe_project, safe_stage)
+        absolute_path = os.path.join(current_app.root_path, relative_path)
+
+        # 确保目录存在
+        os.makedirs(absolute_path, exist_ok=True)
+
+        return relative_path, absolute_path
+    except Exception as e:
+        raise Exception(f"创建上传路径失败: {str(e)}")
+
+
+def generate_unique_filename(directory, original_filename):
+    """生成唯一的文件名，处理文件名冲突"""
+    base_name, extension = os.path.splitext(original_filename)
+    safe_base_name = get_safe_path_component(base_name)
+    counter = 1
+    new_filename = f"{safe_base_name}{extension}"
+
+    while os.path.exists(os.path.join(directory, new_filename)):
+        new_filename = f"{safe_base_name}({counter}){extension}"
+        counter += 1
+
+    return new_filename
 
 
 def get_user_display_name(user):
@@ -96,14 +175,93 @@ def get_stage_files(stage_id):
         return jsonify({'error': str(e)}), 500
 
 
+# @files_bp.route('/files/upload/<int:stage_id>', methods=['POST'])
+# def upload_file(stage_id):
+#     try:
+#         # 检查阶段进度
+#         if not check_stage_progress(stage_id):
+#             return jsonify({'error': '当前阶段未完成，无法上传文件'}), 403
+#
+#         if 'file' not in request.files:
+#             return jsonify({'error': '没有文件'}), 400
+#
+#         file = request.files['file']
+#         if file.filename == '':
+#             return jsonify({'error': '没有选择文件'}), 400
+#
+#         if not allowed_file(file.filename):
+#             return jsonify({'error': '不支持的文件类型'}), 400
+#
+#         # 检查文件大小
+#         file.seek(0, os.SEEK_END)
+#         file_size = file.tell()
+#         file.seek(0)
+#
+#         if file_size > MAX_FILE_SIZE:
+#             return jsonify({'error': '文件大小超过限制'}), 400
+#
+#         # 获取必要信息
+#         stage = ProjectStage.query.get_or_404(stage_id)
+#         project = Project.query.get_or_404(stage.project_id)
+#         user = User.query.get_or_404(get_employee_id())
+#
+#         # 生成上传路径
+#         upload_path = get_upload_path(user.username, project.name, stage.name)
+#
+#         # 保持原始文件名，但处理同名文件
+#         original_filename = file.filename
+#         final_filename = original_filename
+#         base_name, extension = os.path.splitext(original_filename)
+#         counter = 1
+#
+#         while os.path.exists(os.path.join(upload_path, final_filename)):
+#             final_filename = f"{base_name}({counter}){extension}"
+#             counter += 1
+#
+#         # 保存文件
+#         file_path = os.path.join(upload_path, final_filename)
+#         file.save(file_path)
+#
+#         # 创建文件记录
+#         file_record = ProjectFile(
+#             project_id=project.id,
+#             stage_id=stage_id,
+#             file_name=final_filename,
+#             original_name=original_filename,
+#             file_type=file.content_type,
+#             file_path=file_path,
+#             upload_user_id=user.id,
+#             upload_date=datetime.now()
+#         )
+#
+#         db.session.add(file_record)
+#         db.session.commit()
+#
+#         return jsonify({
+#             'message': '文件上传成功',
+#             'file': {
+#                 'id': file_record.id,
+#                 'fileName': file_record.file_name,
+#                 'originalName': file_record.original_name,
+#                 'fileSize': file_size,
+#                 'uploadTime': file_record.upload_date.isoformat(),
+#                 'uploader': get_user_display_name(file_record.upload_user)
+#             }
+#         })
+#
+#     except Exception as e:
+#         # 清理已上传的文件
+#         if 'file_path' in locals() and os.path.exists(file_path):
+#             try:
+#                 os.remove(file_path)
+#             except:
+#                 pass
+#         return jsonify({'error': str(e)}), 500
+
 
 @files_bp.route('/files/upload/<int:stage_id>', methods=['POST'])
 def upload_file(stage_id):
     try:
-        # 检查阶段进度
-        if not check_stage_progress(stage_id):
-            return jsonify({'error': '当前阶段未完成，无法上传文件'}), 403
-
         if 'file' not in request.files:
             return jsonify({'error': '没有文件'}), 400
 
@@ -118,41 +276,34 @@ def upload_file(stage_id):
         file.seek(0, os.SEEK_END)
         file_size = file.tell()
         file.seek(0)
-
         if file_size > MAX_FILE_SIZE:
             return jsonify({'error': '文件大小超过限制'}), 400
 
-        # 获取必要信息
+        # 获取当前用户和阶段信息
+        user_id = get_employee_id()
         stage = ProjectStage.query.get_or_404(stage_id)
-        project = Project.query.get_or_404(stage.project_id)
-        user = User.query.get_or_404(get_employee_id())
+        project_id = stage.project_id
 
-        # 生成上传路径
-        upload_path = get_upload_path(user.username, project.name, stage.name)
+        # 创建上传路径
+        relative_path, absolute_path = create_upload_path(user_id, project_id, stage_id)
 
-        # 保持原始文件名，但处理同名文件
-        original_filename = file.filename
-        final_filename = original_filename
-        base_name, extension = os.path.splitext(original_filename)
-        counter = 1
-
-        while os.path.exists(os.path.join(upload_path, final_filename)):
-            final_filename = f"{base_name}({counter}){extension}"
-            counter += 1
+        # 生成唯一文件名
+        unique_filename = generate_unique_filename(absolute_path, file.filename)
+        file_path = os.path.join(absolute_path, unique_filename)
+        relative_file_path = os.path.join(relative_path, unique_filename)
 
         # 保存文件
-        file_path = os.path.join(upload_path, final_filename)
         file.save(file_path)
 
-        # 创建文件记录
+        # 创建数据库记录
         file_record = ProjectFile(
-            project_id=project.id,
+            project_id=project_id,
             stage_id=stage_id,
-            file_name=final_filename,
-            original_name=original_filename,
+            file_name=unique_filename,
+            original_name=file.filename,
             file_type=file.content_type,
-            file_path=file_path,
-            upload_user_id=user.id,
+            file_path=relative_file_path,
+            upload_user_id=user_id,
             upload_date=datetime.now()
         )
 
@@ -163,16 +314,16 @@ def upload_file(stage_id):
             'message': '文件上传成功',
             'file': {
                 'id': file_record.id,
-                'fileName': file_record.file_name,
-                'originalName': file_record.original_name,
+                'fileName': unique_filename,
+                'originalName': file.filename,
                 'fileSize': file_size,
                 'uploadTime': file_record.upload_date.isoformat(),
-                'uploader': get_user_display_name(file_record.upload_user)
+                'uploader': file_record.upload_user.username
             }
         })
 
     except Exception as e:
-        # 清理已上传的文件
+        # 发生错误时清理已上传的文件
         if 'file_path' in locals() and os.path.exists(file_path):
             try:
                 os.remove(file_path)
@@ -181,15 +332,31 @@ def upload_file(stage_id):
         return jsonify({'error': str(e)}), 500
 
 
+# @files_bp.route('/files/download/<int:file_id>', methods=['GET'])
+# def download_file(file_id):
+#     try:
+#         file_record = ProjectFile.query.get_or_404(file_id)
+#         if not os.path.exists(file_record.file_path):
+#             return jsonify({'error': '文件不存在'}), 404
+#
+#         return send_file(
+#             file_record.file_path,
+#             as_attachment=True,
+#             download_name=file_record.original_name
+#         )
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
+
 @files_bp.route('/files/download/<int:file_id>', methods=['GET'])
 def download_file(file_id):
     try:
         file_record = ProjectFile.query.get_or_404(file_id)
-        if not os.path.exists(file_record.file_path):
-            return jsonify({'error': '文件不存在'}), 404
+        file_path = os.path.join(current_app.root_path, file_record.file_path)
 
+        if not os.path.exists(file_path):
+            return jsonify({'error': '文件不存在'}), 404
         return send_file(
-            file_record.file_path,
+            file_path,
             as_attachment=True,
             download_name=file_record.original_name
         )
@@ -197,28 +364,60 @@ def download_file(file_id):
         return jsonify({'error': str(e)}), 500
 
 
+# @files_bp.route('/files/<int:file_id>', methods=['DELETE'])
+# def delete_file(file_id):
+#     try:
+#         file_record = ProjectFile.query.get_or_404(file_id)
+#
+#         # 检查权限
+#         if file_record.upload_user_id != get_employee_id():
+#             return jsonify({'error': '没有权限删除此文件'}), 403
+#
+#         # 删除物理文件
+#         if os.path.exists(file_record.file_path):
+#             os.remove(file_record.file_path)
+#
+#             # 检查并删除空文件夹
+#             directory = os.path.dirname(file_record.file_path)
+#             while directory != BASE_UPLOAD_FOLDER:
+#                 if not os.listdir(directory):
+#                     os.rmdir(directory)
+#                     directory = os.path.dirname(directory)
+#                 else:
+#                     break
+#
+#         # 删除数据库记录
+#         db.session.delete(file_record)
+#         db.session.commit()
+#
+#         return jsonify({'message': '文件删除成功'})
+#
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
+
 @files_bp.route('/files/<int:file_id>', methods=['DELETE'])
 def delete_file(file_id):
     try:
         file_record = ProjectFile.query.get_or_404(file_id)
 
-        # 检查权限
+        # 权限检查
         if file_record.upload_user_id != get_employee_id():
             return jsonify({'error': '没有权限删除此文件'}), 403
 
-        # 删除物理文件
-        if os.path.exists(file_record.file_path):
-            os.remove(file_record.file_path)
+        file_path = os.path.join(current_app.root_path, file_record.file_path)
 
-            # 检查并删除空文件夹
-            directory = os.path.dirname(file_record.file_path)
-            while directory != BASE_UPLOAD_FOLDER:
-                if not os.listdir(directory):
-                    os.rmdir(directory)
-                    directory = os.path.dirname(directory)
+        # 删除物理文件
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+            # 递归删除空目录
+            current_dir = os.path.dirname(file_path)
+            while current_dir != os.path.join(current_app.root_path, UPLOAD_FOLDER):
+                if len(os.listdir(current_dir)) == 0:
+                    os.rmdir(current_dir)
+                    current_dir = os.path.dirname(current_dir)
                 else:
                     break
-
         # 删除数据库记录
         db.session.delete(file_record)
         db.session.commit()
@@ -228,6 +427,7 @@ def delete_file(file_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 def get_user_info_from_token():
     """
     从授权令牌中获取用户信息，并进行改进的错误处理
@@ -235,7 +435,7 @@ def get_user_info_from_token():
     try:
         auth_header = request.headers.get('Authorization', '')
         if not auth_header:
-            print("No Authorization header")
+            print("无 Authorization 标头")
             return None
 
         token = auth_header.replace('Bearer ', '').strip()
@@ -251,22 +451,96 @@ def get_user_info_from_token():
         return payload
 
     except jwt.ExpiredSignatureError:
-        print("Token has expired")
+        print("令牌已过期")
         return None
     except jwt.InvalidTokenError as e:
-        print(f"Invalid token error: {str(e)}")
+        print(f"无效令牌错误： {str(e)}")
         return None
     except Exception as e:
-        print(f"Unexpected error in token processing: {str(e)}")
+        print(f"令牌处理中出现意外错误: {str(e)}")
         return None
 
+
+# @files_bp.route('/files/search', methods=['GET'])
+# def search_files():
+#     try:
+#         # 获取搜索查询参数
+#         search_query = request.args.get('query', '').strip()
+#         if not search_query:
+#             return jsonify({'error': '搜索内容填写是必需的'}), 400
+#
+#         # 验证用户身份
+#         user_info = get_user_info_from_token()
+#         if not user_info:
+#             return jsonify({'error': '令牌无效或过期'}), 401
+#
+#         user_id = user_info.get('user_id')
+#         user_role = user_info.get('role')
+#
+#         # 构建基础查询
+#         base_query = ProjectFile.query.options(
+#             joinedload(ProjectFile.project),
+#             joinedload(ProjectFile.upload_user)
+#         )
+#
+#         # 非管理员只能看到自己的文件
+#         if user_role != 1:  # 非管理员角色
+#             base_query = base_query.filter(ProjectFile.upload_user_id == user_id)
+#
+#         # 构建搜索条件
+#         search_conditions = or_(
+#             ProjectFile.original_name.ilike(f'%{search_query}%'),
+#             ProjectFile.file_type.ilike(f'%{search_query}%'),
+#             Project.name.ilike(f'%{search_query}%'),
+#             User.username.ilike(f'%{search_query}%')
+#         )
+#
+#         # 执行查询
+#         search_results = base_query \
+#             .join(Project) \
+#             .join(User, ProjectFile.upload_user_id == User.id) \
+#             .filter(search_conditions) \
+#             .all()
+#
+#         # 处理查询结果
+#         results = []
+#         for file in search_results:
+#             try:
+#                 # 修改文件路径获取方式，使用完整路径
+#                 file_path = os.path.join(current_app.root_path, file.file_path)
+#                 file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+#             except Exception as e:
+#                 print(f"Error getting file size for {file.file_name}: {str(e)}")
+#                 file_size = 0
+#
+#             results.append({
+#                 'id': file.id,
+#                 'fileName': file.file_name,
+#                 'originalName': file.original_name,
+#                 'fileType': file.file_type,
+#                 'fileSize': file_size,
+#                 'stageName': file.stage.name if file.stage else None,
+#                 'uploadTime': file.upload_date.isoformat(),
+#                 'uploader': file.upload_user.username,
+#                 'projectName': file.project.name if file.project else None
+#             })
+#
+#         return jsonify({
+#             'results': results,
+#             'total': len(results)
+#         })
+#
+#     except Exception as e:
+#         print(f"Search error: {str(e)}")
+#         return jsonify({'error': str(e)}), 500
 
 
 @files_bp.route('/files/search', methods=['GET'])
 def search_files():
     try:
-        # 获取搜索查询参数
         search_query = request.args.get('query', '').strip()
+        search_type = request.args.get('type', 'all')  # 可选值: all, filename, content
+
         if not search_query:
             return jsonify({'error': 'Search query is required'}), 400
 
@@ -275,50 +549,62 @@ def search_files():
         if not user_info:
             return jsonify({'error': 'Invalid or expired token'}), 401
 
-        user_id = user_info.get('user_id')
-        user_role = user_info.get('role')
-
         # 构建基础查询
         base_query = ProjectFile.query.options(
             joinedload(ProjectFile.project),
             joinedload(ProjectFile.upload_user)
         )
 
-        # 非管理员只能看到自己的文件
-        if user_role != 1:  # 非管理员角色
-            base_query = base_query.filter(ProjectFile.upload_user_id == user_id)
+        # 根据用户角色限制查询范围
+        if user_info.get('role') != 1:  # 非管理员
+            base_query = base_query.filter(ProjectFile.upload_user_id == user_info.get('user_id'))
 
         # 构建搜索条件
-        search_conditions = or_(
-            ProjectFile.original_name.ilike(f'%{search_query}%'),
-            ProjectFile.file_type.ilike(f'%{search_query}%'),
-            Project.name.ilike(f'%{search_query}%'),
-            User.username.ilike(f'%{search_query}%')
-        )
+        search_conditions = []
+        if search_type in ['all', 'filename']:
+            search_conditions.extend([
+                ProjectFile.original_name.ilike(f'%{search_query}%'),
+                Project.name.ilike(f'%{search_query}%'),
+                User.username.ilike(f'%{search_query}%')
+            ])
+
+        if search_type in ['all', 'content']:
+            search_conditions.append(ProjectFile.content_text.ilike(f'%{search_query}%'))
 
         # 执行查询
         search_results = base_query \
             .join(Project) \
             .join(User, ProjectFile.upload_user_id == User.id) \
-            .filter(search_conditions) \
+            .filter(or_(*search_conditions)) \
             .all()
 
-        # 处理查询结果
+        # 处理结果
         results = []
         for file in search_results:
-            file_path = os.path.join(UPLOAD_FOLDER, file.file_name)
-            file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+            try:
+                file_path = os.path.join(current_app.root_path, file.file_path)
+                file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
 
-            results.append({
-                'id': file.id,
-                'fileName': file.file_name,
-                'originalName': file.original_name,
-                'fileType': file.file_type,
-                'fileSize': file_size,
-                'uploadTime': file.upload_date.isoformat(),
-                'uploader': file.upload_user.username,
-                'projectName': file.project.name if file.project else None
-            })
+                # 获取内容匹配的上下文
+                content_preview = None
+                if file.content_text and search_type in ['all', 'content']:
+                    content_preview = get_content_preview(file.content_text, search_query)
+
+                results.append({
+                    'id': file.id,
+                    'fileName': file.file_name,
+                    'stageName': file.stage.name if file.stage else None,
+                    'originalName': file.original_name,
+                    'fileType': file.file_type,
+                    'fileSize': file_size,
+                    'uploadTime': file.upload_date.isoformat(),
+                    'uploader': file.upload_user.username,
+                    'projectName': file.project.name if file.project else None,
+                    'contentPreview': content_preview
+                })
+            except Exception as e:
+                print(f"Error processing search result: {str(e)}")
+                continue
 
         return jsonify({
             'results': results,
@@ -326,5 +612,29 @@ def search_files():
         })
 
     except Exception as e:
-        print(f"Search error: {str(e)}")  # 调试日志
+        print(f"Search error: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
+def get_content_preview(content, query, context_length=100):
+    """获取匹配内容的上下文预览"""
+    if not content:
+        return None
+
+    try:
+        index = content.lower().find(query.lower())
+        if index == -1:
+            return None
+
+        start = max(0, index - context_length // 2)
+        end = min(len(content), index + len(query) + context_length // 2)
+
+        preview = content[start:end]
+        if start > 0:
+            preview = f"...{preview}"
+        if end < len(content):
+            preview = f"{preview}..."
+
+        return preview
+    except:
+        return None

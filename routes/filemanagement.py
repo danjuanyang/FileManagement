@@ -1,5 +1,6 @@
 # filemanagement.py
 import re
+import sys
 
 from flask import Blueprint
 from flask_cors import CORS
@@ -15,10 +16,13 @@ import os
 from models import db, Project, ProjectFile, ProjectStage, User
 from auth import get_employee_id
 
-UPLOAD_FOLDER = 'uploads'
+# 获取Python解释器所在目录
+python_dir = os.path.dirname(sys.executable)
+# 设置上传目录为程序根目录下文件夹
+UPLOAD_FOLDER = os.path.join(python_dir, 'uploads')
 ALLOWED_EXTENSIONS = {'doc', 'docx', 'pdf', 'xls', 'xlsx', 'txt', 'zip', 'rar'}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
-BASE_UPLOAD_FOLDER = 'uploads'  # 基础上传目录
+BASE_UPLOAD_FOLDER = os.path.join(python_dir, 'uploads') # 基础上传目录
 
 files_bp = Blueprint('files', __name__)
 CORS(files_bp)
@@ -175,90 +179,6 @@ def get_stage_files(stage_id):
         return jsonify({'error': str(e)}), 500
 
 
-# @files_bp.route('/files/upload/<int:stage_id>', methods=['POST'])
-# def upload_file(stage_id):
-#     try:
-#         # 检查阶段进度
-#         if not check_stage_progress(stage_id):
-#             return jsonify({'error': '当前阶段未完成，无法上传文件'}), 403
-#
-#         if 'file' not in request.files:
-#             return jsonify({'error': '没有文件'}), 400
-#
-#         file = request.files['file']
-#         if file.filename == '':
-#             return jsonify({'error': '没有选择文件'}), 400
-#
-#         if not allowed_file(file.filename):
-#             return jsonify({'error': '不支持的文件类型'}), 400
-#
-#         # 检查文件大小
-#         file.seek(0, os.SEEK_END)
-#         file_size = file.tell()
-#         file.seek(0)
-#
-#         if file_size > MAX_FILE_SIZE:
-#             return jsonify({'error': '文件大小超过限制'}), 400
-#
-#         # 获取必要信息
-#         stage = ProjectStage.query.get_or_404(stage_id)
-#         project = Project.query.get_or_404(stage.project_id)
-#         user = User.query.get_or_404(get_employee_id())
-#
-#         # 生成上传路径
-#         upload_path = get_upload_path(user.username, project.name, stage.name)
-#
-#         # 保持原始文件名，但处理同名文件
-#         original_filename = file.filename
-#         final_filename = original_filename
-#         base_name, extension = os.path.splitext(original_filename)
-#         counter = 1
-#
-#         while os.path.exists(os.path.join(upload_path, final_filename)):
-#             final_filename = f"{base_name}({counter}){extension}"
-#             counter += 1
-#
-#         # 保存文件
-#         file_path = os.path.join(upload_path, final_filename)
-#         file.save(file_path)
-#
-#         # 创建文件记录
-#         file_record = ProjectFile(
-#             project_id=project.id,
-#             stage_id=stage_id,
-#             file_name=final_filename,
-#             original_name=original_filename,
-#             file_type=file.content_type,
-#             file_path=file_path,
-#             upload_user_id=user.id,
-#             upload_date=datetime.now()
-#         )
-#
-#         db.session.add(file_record)
-#         db.session.commit()
-#
-#         return jsonify({
-#             'message': '文件上传成功',
-#             'file': {
-#                 'id': file_record.id,
-#                 'fileName': file_record.file_name,
-#                 'originalName': file_record.original_name,
-#                 'fileSize': file_size,
-#                 'uploadTime': file_record.upload_date.isoformat(),
-#                 'uploader': get_user_display_name(file_record.upload_user)
-#             }
-#         })
-#
-#     except Exception as e:
-#         # 清理已上传的文件
-#         if 'file_path' in locals() and os.path.exists(file_path):
-#             try:
-#                 os.remove(file_path)
-#             except:
-#                 pass
-#         return jsonify({'error': str(e)}), 500
-
-
 @files_bp.route('/files/upload/<int:stage_id>', methods=['POST'])
 def upload_file(stage_id):
     try:
@@ -332,21 +252,6 @@ def upload_file(stage_id):
         return jsonify({'error': str(e)}), 500
 
 
-# @files_bp.route('/files/download/<int:file_id>', methods=['GET'])
-# def download_file(file_id):
-#     try:
-#         file_record = ProjectFile.query.get_or_404(file_id)
-#         if not os.path.exists(file_record.file_path):
-#             return jsonify({'error': '文件不存在'}), 404
-#
-#         return send_file(
-#             file_record.file_path,
-#             as_attachment=True,
-#             download_name=file_record.original_name
-#         )
-#     except Exception as e:
-#         return jsonify({'error': str(e)}), 500
-
 @files_bp.route('/files/download/<int:file_id>', methods=['GET'])
 def download_file(file_id):
     try:
@@ -363,37 +268,6 @@ def download_file(file_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
-# @files_bp.route('/files/<int:file_id>', methods=['DELETE'])
-# def delete_file(file_id):
-#     try:
-#         file_record = ProjectFile.query.get_or_404(file_id)
-#
-#         # 检查权限
-#         if file_record.upload_user_id != get_employee_id():
-#             return jsonify({'error': '没有权限删除此文件'}), 403
-#
-#         # 删除物理文件
-#         if os.path.exists(file_record.file_path):
-#             os.remove(file_record.file_path)
-#
-#             # 检查并删除空文件夹
-#             directory = os.path.dirname(file_record.file_path)
-#             while directory != BASE_UPLOAD_FOLDER:
-#                 if not os.listdir(directory):
-#                     os.rmdir(directory)
-#                     directory = os.path.dirname(directory)
-#                 else:
-#                     break
-#
-#         # 删除数据库记录
-#         db.session.delete(file_record)
-#         db.session.commit()
-#
-#         return jsonify({'message': '文件删除成功'})
-#
-#     except Exception as e:
-#         return jsonify({'error': str(e)}), 500
 
 @files_bp.route('/files/<int:file_id>', methods=['DELETE'])
 def delete_file(file_id):
@@ -459,80 +333,6 @@ def get_user_info_from_token():
     except Exception as e:
         print(f"令牌处理中出现意外错误: {str(e)}")
         return None
-
-
-# @files_bp.route('/files/search', methods=['GET'])
-# def search_files():
-#     try:
-#         # 获取搜索查询参数
-#         search_query = request.args.get('query', '').strip()
-#         if not search_query:
-#             return jsonify({'error': '搜索内容填写是必需的'}), 400
-#
-#         # 验证用户身份
-#         user_info = get_user_info_from_token()
-#         if not user_info:
-#             return jsonify({'error': '令牌无效或过期'}), 401
-#
-#         user_id = user_info.get('user_id')
-#         user_role = user_info.get('role')
-#
-#         # 构建基础查询
-#         base_query = ProjectFile.query.options(
-#             joinedload(ProjectFile.project),
-#             joinedload(ProjectFile.upload_user)
-#         )
-#
-#         # 非管理员只能看到自己的文件
-#         if user_role != 1:  # 非管理员角色
-#             base_query = base_query.filter(ProjectFile.upload_user_id == user_id)
-#
-#         # 构建搜索条件
-#         search_conditions = or_(
-#             ProjectFile.original_name.ilike(f'%{search_query}%'),
-#             ProjectFile.file_type.ilike(f'%{search_query}%'),
-#             Project.name.ilike(f'%{search_query}%'),
-#             User.username.ilike(f'%{search_query}%')
-#         )
-#
-#         # 执行查询
-#         search_results = base_query \
-#             .join(Project) \
-#             .join(User, ProjectFile.upload_user_id == User.id) \
-#             .filter(search_conditions) \
-#             .all()
-#
-#         # 处理查询结果
-#         results = []
-#         for file in search_results:
-#             try:
-#                 # 修改文件路径获取方式，使用完整路径
-#                 file_path = os.path.join(current_app.root_path, file.file_path)
-#                 file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
-#             except Exception as e:
-#                 print(f"Error getting file size for {file.file_name}: {str(e)}")
-#                 file_size = 0
-#
-#             results.append({
-#                 'id': file.id,
-#                 'fileName': file.file_name,
-#                 'originalName': file.original_name,
-#                 'fileType': file.file_type,
-#                 'fileSize': file_size,
-#                 'stageName': file.stage.name if file.stage else None,
-#                 'uploadTime': file.upload_date.isoformat(),
-#                 'uploader': file.upload_user.username,
-#                 'projectName': file.project.name if file.project else None
-#             })
-#
-#         return jsonify({
-#             'results': results,
-#             'total': len(results)
-#         })
-#
-#     except Exception as e:
-#         print(f"Search error: {str(e)}")
-#         return jsonify({'error': str(e)}), 500
 
 
 @files_bp.route('/files/search', methods=['GET'])

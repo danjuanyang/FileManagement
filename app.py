@@ -1,4 +1,8 @@
 # app.py
+import os
+import sys
+import tempfile
+
 from config import app, db
 from flask import request, jsonify, redirect, url_for
 import jwt
@@ -8,7 +12,6 @@ from routes.filemanagement import files_bp
 from routes.leaders import leader_bp
 from routes.employees import employee_bp
 from routes.projectplan import projectplan_bp
-
 app.register_blueprint(leader_bp, url_prefix='/api/leader')
 app.register_blueprint(employee_bp, url_prefix='/api/employee')
 
@@ -23,6 +26,7 @@ def login():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
+
 
     user = User.query.filter_by(username=username).first()
 
@@ -71,4 +75,8 @@ def register():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    app.run(debug=True, port=7777)
+        print(f"数据库将在: {app.config['SQLALCHEMY_DATABASE_URI']}")
+        print("环境变量:", os.environ)
+        print("Python路径:", sys.executable)
+        print("临时文件夹:", tempfile.gettempdir())
+    app.run(port=7777)

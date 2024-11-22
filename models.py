@@ -82,30 +82,29 @@ class ProjectUpdate(db.Model):
 
 # 项目文件表
 class ProjectFile(db.Model):
-    __tablename__ = 'project_files'
-
+    tablename = 'project_files'
     id = db.Column(db.Integer, primary_key=True)
-    original_name = db.Column(db.String(255))  # 新增字段
+    original_name = db.Column(db.String(
+        255))  # 新增字段
     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
     stage_id = db.Column(db.Integer, db.ForeignKey('project_stages.id'), nullable=False)
     file_name = db.Column(db.String(255), nullable=False)
     file_type = db.Column(db.String(100))
     file_path = db.Column(db.String(255), nullable=False)
     upload_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    upload_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-
+    upload_date = db.Column(db.DateTime, nullable=False,
+                            default=datetime.now)
     # 关联 - 移除重复的关系定义
     upload_user = db.relationship('User', backref='uploaded_files')
     # 添加新字段用于存储文件内容
     content_text = db.Column(db.Text, nullable=True)
     # 添加字段表示是否已提取文本
     text_extracted = db.Column(db.Boolean, default=False)
-
     # 创建文本内容的全文索引（如果数据库支持）
-    __table_args__ = (
-        Index('idx_file_content', content_text, postgresql_using='gin',
-              postgresql_ops={'content_text': 'gin_trgm_ops'}),
-    )
+    table_args = (
+        Index('idx_file_content',
+              content_text, postgresql_using='gin',
+              postgresql_ops={'content_text': 'gin_trgm_ops'}),)
 
 
 # 阶段任务表

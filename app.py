@@ -2,6 +2,7 @@
 import os
 import sys
 import tempfile
+import time
 
 from config import app, db
 from flask import request, jsonify, redirect, url_for
@@ -75,8 +76,9 @@ def register():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-        print(f"数据库将在: {app.config['SQLALCHEMY_DATABASE_URI']}")
-        print("环境变量:", os.environ)
+        print("永不宕机！程序开启时间：",time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()))
+        print(f"数据库在: {app.config['SQLALCHEMY_DATABASE_URI']}")
+        # print("环境变量:", os.environ)
         print("Python路径:", sys.executable)
         print("临时文件夹:", tempfile.gettempdir())
     app.run(port=7777)

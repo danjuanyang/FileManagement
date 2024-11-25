@@ -7,7 +7,7 @@ from flask import Blueprint, request, jsonify
 from flask_cors import CORS
 
 from config import app
-from models import db, Project, ProjectFile, ProjectUpdate, ProjectStage, User, ReportClockinDetail, ReportClockin
+from models import db, Project, ProjectFile, ProjectUpdate, ProjectStage, User, ReportClockinDetail, ReportClockin, StageTask, TaskProgressUpdate
 from auth import get_employee_id
 
 employee_bp = Blueprint('employee', __name__)
@@ -273,64 +273,6 @@ def get_profile(current_user):
     }), 200
 
 
-# 填报补卡功能接口
-# @employee_bp.route('/fill-card', methods=['POST'])
-# @token_required
-# def report_clock_in(current_user):
-#     data = request.get_json()
-#     dates = data.get('dates', [])
-#
-#     if len(dates) > 3:
-#         return jsonify({'error': '最多只能选择3天'}), 400
-#
-#     try:
-#         # 创建补卡记录
-#         report = ReportClockin(
-#             employee_id=current_user.id,
-#             report_date=datetime.now()
-#         )
-#         db.session.add(report)
-#         # 先提交以获取report_id
-#         db.session.flush()
-#
-#         # 添加补卡明细
-#         reported_dates = []
-#         for date_str in dates:
-#             try:
-#                 date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-#                 weekday = date_obj.strftime('%A')
-#
-#                 # 创建明细记录
-#                 detail = ReportClockinDetail(
-#                     report_id=report.id,
-#                     clockin_date=date_obj.date(),
-#                     weekday=weekday
-#                 )
-#                 db.session.add(detail)
-#
-#                 reported_dates.append({
-#                     'date': date_str,
-#                     'weekday': weekday
-#                 })
-#             except ValueError:
-#                 db.session.rollback()
-#                 return jsonify({'error': f'无效的日期格式: {date_str}'}), 400
-#
-#         # 最后提交所有更改
-#         db.session.commit()
-#         return jsonify({
-#             'message': '补卡申请提交成功',
-#             'report_id': report.id,
-#             'employee_id': current_user.id,
-#             'employee_name': current_user.name if hasattr(current_user, 'name') else current_user.username,
-#             'reported_dates': reported_dates
-#         }), 200
-#
-#     except Exception as e:
-#         db.session.rollback()
-#         return jsonify({'error': str(e)}), 500
-
-
 # 后端接口 - 添加检查当月是否已填报的接口
 @employee_bp.route('/check-monthly-report', methods=['GET'])
 @token_required
@@ -434,3 +376,49 @@ def get_report_data(current_user):
         'employee_id': current_user.id,
         'reported_dates': reported_dates
     })
+
+
+#2024年11月25日16:59:02
+
+# 创建任务进度更新
+@employee_bp.route('/tasks/<int:task_id>/progress-updates', methods=['POST'])
+def add_task_progress_update(task_id):
+    task = StageTask.query.get_or_404(task_id)
+    data = request.get_json()
+
+    if 'progress' not in data or 'description' not in data:
+        return jsonify({'error': '缺少必要字段：progress 或 description'}), 400
+
+    # 确保进度是向前推进的
+    if data['progress'] < task.progress:
+        return jsonify({'error': '任务进度不能回退'}), 400
+
+    # 创建进度更新记录
+    update = TaskProgressUpdate(
+        task_id=task_id,
+        progress=data['progress'],
+        description=data['description']
+    )
+
+    # 更新任务的当前进度
+    task.progress = data['progress']
+    if task.progress == 100:
+        task.status = 'completed'
+
+    db.session.add(update)
+    db.session.commit()
+
+    return jsonify({'message': '任务进度更新成功'})
+
+# 获取任务的进度更新记录
+@employee_bp.route('/tasks/<int:task_id>/progress-updates', methods=['GET'])
+def get_task_progress_updates(task_id):
+    task = StageTask.query.get_or_404(task_id)
+    updates = TaskProgressUpdate.query.filter_by(task_id=task_id).order_by(TaskProgressUpdate.created_at.desc()).all()
+
+    return jsonify([{
+        'id': update.id,
+        'progress': update.progress,
+        'description': update.description,
+        'created_at': update.created_at.isoformat()
+    } for update in updates])

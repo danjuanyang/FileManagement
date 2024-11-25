@@ -46,7 +46,7 @@ class Project(db.Model):
 
 
 # 项目阶段表
-# 更新 ProjectStage 模型以包含任务关系
+
 class ProjectStage(db.Model):
     __tablename__ = 'project_stages'
 
@@ -117,13 +117,13 @@ class StageTask(db.Model):
     description = db.Column(db.Text)
     due_date = db.Column(db.Date, nullable=False)
     status = db.Column(db.String(20), default='pending')  # 待处理、正在进行、已完成
-    progress = db.Column(db.Integer, default=0)
+    progress = db.Column(db.Integer, default=0) #进度
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # 关系
     stage = db.relationship('ProjectStage', back_populates='tasks')
-
+    progress_updates = db.relationship('TaskProgressUpdate', back_populates='task', cascade='all, delete-orphan')
 
 # 编辑时间跟踪表
 class EditTimeTracking(db.Model):
@@ -182,3 +182,17 @@ class ReportClockinDetail(db.Model):
     clockin_date = db.Column(db.Date, nullable=False)  # 补卡日期
     weekday = db.Column(db.String(20), nullable=False)  # 星期几
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.now())
+
+
+#任务更新表
+class TaskProgressUpdate(db.Model):
+    __tablename__ = 'task_progress_updates'
+
+    id = db.Column(db.Integer, primary_key=True)
+    task_id = db.Column(db.Integer, db.ForeignKey('stage_tasks.id'), nullable=False)
+    progress = db.Column(db.Integer, nullable=False)  # 进度百分比
+    description = db.Column(db.String(255), nullable=True)  # 更新内容说明
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)  # 更新时间
+
+    # 关系
+    task = db.relationship('StageTask', back_populates='progress_updates')

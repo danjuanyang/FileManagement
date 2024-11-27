@@ -16,6 +16,7 @@ def get_project_stages(project_id):
     stages = ProjectStage.query.filter_by(project_id=project_id).all()
     return jsonify([{
         'id': stage.id,
+        'project_id': stage.project_id,
         'name': stage.name,
         'description': stage.description,
         'startDate': stage.start_date.isoformat(),
@@ -24,6 +25,7 @@ def get_project_stages(project_id):
         'status': stage.status,
         'tasks': [{
             'id': task.id,
+            'project_id': stage.project_id,
             'name': task.name,
             'description': task.description,
             'dueDate': task.due_date.isoformat(),
@@ -34,23 +36,6 @@ def get_project_stages(project_id):
 
 
 # 创建项目阶段
-# @projectplan_bp.route('/stages', methods=['POST'])
-# def create_project_stage():
-#     data = request.get_json()
-#     stage = ProjectStage(
-#         name=data['name'],
-#         description=data['description'],
-#         start_date=datetime.strptime(data['startDate'], '%Y-%m-%d'),
-#         end_date=datetime.strptime(data['endDate'], '%Y-%m-%d'),
-#         progress=data['progress'],
-#         status=data['status'],
-#         project_id=data['projectId']
-#     )
-#     db.session.add(stage)
-#     db.session.commit()
-#     return jsonify({'message': '阶段创建成功'}), 201
-
-
 @projectplan_bp.route('/stages', methods=['POST'])
 def create_project_stage():
     data = request.get_json()
@@ -96,6 +81,7 @@ def update_project_stage(id):
     return jsonify({'message': '阶段更新成功'}), 200
 
 
+# 删除项目阶段
 @projectplan_bp.route('/stages/<int:id>', methods=['DELETE'])
 def delete_project_stage(id):
     stage = ProjectStage.query.get_or_404(id)
@@ -106,25 +92,6 @@ def delete_project_stage(id):
 
 # -------------------
 # 为阶段创建任务
-# @projectplan_bp.route('/stages/<int:stage_id>/tasks', methods=['POST'])
-# def create_stage_task(stage_id):
-#     data = request.get_json()
-#     task = StageTask(
-#         stage_id=stage_id,
-#         name=data['name'],
-#         description=data.get('description', ''),
-#         due_date=datetime.strptime(data['dueDate'], '%Y-%m-%d'),
-#         status=data.get('status', 'pending'),
-#         progress=data.get('progress', 0)
-#     )
-#     db.session.add(task)
-#     db.session.commit()
-#
-#     # 根据任务更新阶段进度
-#     update_stage_progress(stage_id)
-#
-#     return jsonify({'message': '任务创建成功', 'id': task.id}), 201
-
 @projectplan_bp.route('/stages/<int:stage_id>/tasks', methods=['POST'])
 def create_stage_task(stage_id):
     data = request.get_json()

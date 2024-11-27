@@ -1,4 +1,5 @@
 # router/employees.py
+import os
 from datetime import datetime
 from functools import wraps
 
@@ -9,6 +10,7 @@ from flask_cors import CORS
 from config import app
 from models import db, Project, ProjectFile, ProjectUpdate, ProjectStage, User, ReportClockinDetail, ReportClockin, StageTask, TaskProgressUpdate
 from auth import get_employee_id
+from routes.filemanagement import allowed_file, MAX_FILE_SIZE, generate_unique_filename, create_upload_path
 
 employee_bp = Blueprint('employee', __name__)
 CORS(employee_bp)  # 为此蓝图启用 CORS
@@ -60,36 +62,6 @@ def update_project(project_id):
     return jsonify({'message': '项目更新成功'})
 
 
-# 文件上传、编辑和删除
-@employee_bp.route('/projects/<int:project_id>/files', methods=['POST'])
-def upload_file(project_id):
-    file = request.files['file']
-    employee_id = request.form['employee_id']
-
-    project_file = ProjectFile(
-        project_id=project_id,
-        file_name=file.filename,
-        file_type=file.content_type,
-        file_url=f'/uploads/{file.filename}',
-        upload_user_id=employee_id,
-        upload_date=datetime.now()
-    )
-    db.session.add(project_file)
-    db.session.commit()
-    file.save(f'uploads/{file.filename}')
-
-    return jsonify({'message': '文件上传成功'})
-
-
-# 获取文件并显示
-@employee_bp.route('/projects/<int:project_id>/files/<int:file_id>', methods=['DELETE'])
-def delete_file(project_id, file_id):
-    project_file = ProjectFile.query.get_or_404(file_id)
-    db.session.delete(project_file)
-    db.session.commit()
-    return jsonify({'message': '文件删除成功'})
-
-
 # 进度跟踪
 @employee_bp.route('/projects/<int:project_id>/progress', methods=['PUT'])
 def update_progress(project_id):
@@ -100,20 +72,6 @@ def update_progress(project_id):
     return jsonify({'message': '已成功更新进度'})
 
 
-# 文件搜索
-@employee_bp.route('/files/search', methods=['GET'])
-def search_files():
-    keyword = request.args.get('keyword', '')
-    employee_id = request.args.get('employee_id', type=int)
-    files = ProjectFile.query.filter(ProjectFile.file_name.ilike(f'%{keyword}%'),
-                                     ProjectFile.upload_user_id == employee_id).all()
-    return jsonify([{
-        'id': f.id,
-        'file_name': f.file_name,
-        'file_type': f.file_type,
-        'file_url': f.file_url,
-        'project_name': f.project.name
-    } for f in files])
 
 
 # 获取项目进度以供显示
@@ -200,32 +158,9 @@ def update_project_progress(project_id):
 
 
 # ---------------------------------
-# 上传
-@employee_bp.route('/projects/<int:project_id>/stages/<int:stage_id>/upload', methods=['POST'])
-def upload_stage_file(project_id, stage_id):
-    file = request.files['file']
-    employee_id = request.form['employee_id']
 
-    project = Project.query.get_or_404(project_id)
-    stage = ProjectStage.query.get_or_404(stage_id)
 
-    if stage.project_id != project.id:
-        return jsonify({'error': 'Stage 不属于指定的项目'}), 400
 
-    project_file = ProjectFile(
-        project_id=project_id,
-        stage_id=stage_id,
-        file_name=file.filename,
-        file_type=file.content_type,
-        file_url=f'/uploads/{file.filename}',
-        upload_user_id=employee_id,
-        upload_date=datetime.now()
-    )
-    db.session.add(project_file)
-    db.session.commit()
-    file.save(f'uploads/{file.filename}')
-
-    return jsonify({'message': '文件上传成功'})
 
 
 # 从登录信息获取用户信息

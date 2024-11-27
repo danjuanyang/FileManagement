@@ -18,7 +18,7 @@ app.register_blueprint(employee_bp, url_prefix='/api/employee')
 
 app.register_blueprint(projectplan_bp, url_prefix='/api/projectplan')
 
-app.register_blueprint(files_bp, url_prefix='/api')
+app.register_blueprint(files_bp, url_prefix='/api/files')
 
 
 # 用户登录接口

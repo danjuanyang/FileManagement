@@ -25,7 +25,6 @@ class User(db.Model):
         return bcrypt.checkpw(password.encode('utf-8'), self.password_hash.encode('utf-8'))
 
 
-# 项目表
 class Project(db.Model):
     __tablename__ = 'projects'
 
@@ -40,10 +39,9 @@ class Project(db.Model):
 
     # 关联
     employee = db.relationship('User', backref='projects')
-    files = db.relationship('ProjectFile', backref='project', lazy=True)
+    files = db.relationship('ProjectFile', back_populates='project', lazy=True)
     stages = db.relationship('ProjectStage', back_populates='project', lazy=True)
     updates = db.relationship('ProjectUpdate', back_populates='project')
-
 
 # 项目阶段表
 
@@ -61,7 +59,7 @@ class ProjectStage(db.Model):
 
     # 关系
     project = db.relationship('Project', back_populates='stages')
-    files = db.relationship('ProjectFile', backref='stage', lazy=True)
+    stage_files = db.relationship('ProjectFile', back_populates='stage', lazy=True)  # 修改为 stage_files
     tasks = db.relationship('StageTask', back_populates='stage', lazy=True)
 
 
@@ -73,7 +71,7 @@ class ProjectUpdate(db.Model):
     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
     progress = db.Column(db.Integer, nullable=False)
     description = db.Column(db.String(255), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
     type = db.Column(db.String(50))
 
     # 关联
@@ -82,30 +80,30 @@ class ProjectUpdate(db.Model):
 
 # 项目文件表
 class ProjectFile(db.Model):
-    tablename = 'project_files'
+    __tablename__ = 'project_files'
     id = db.Column(db.Integer, primary_key=True)
-    original_name = db.Column(db.String(
-        255))  # 新增字段
+    original_name = db.Column(db.String(255))
     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
     stage_id = db.Column(db.Integer, db.ForeignKey('project_stages.id'), nullable=False)
+    task_id = db.Column(db.Integer, db.ForeignKey('stage_tasks.id'), nullable=True)
     file_name = db.Column(db.String(255), nullable=False)
     file_type = db.Column(db.String(100))
     file_path = db.Column(db.String(255), nullable=False)
     upload_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    upload_date = db.Column(db.DateTime, nullable=False,
-                            default=datetime.now)
-    # 关联 - 移除重复的关系定义
+    upload_date = db.Column(db.DateTime, nullable=False, default=datetime.now)
+
+    # 关联
     upload_user = db.relationship('User', backref='uploaded_files')
-    # 添加新字段用于存储文件内容
+    project = db.relationship('Project', back_populates='files')
+    stage = db.relationship('ProjectStage', back_populates='stage_files')  # 修改为 stage_files
+    task = db.relationship('StageTask', backref='files')
     content_text = db.Column(db.Text, nullable=True)
-    # 添加字段表示是否已提取文本
     text_extracted = db.Column(db.Boolean, default=False)
     # 创建文本内容的全文索引（如果数据库支持）
     table_args = (
         Index('idx_file_content',
               content_text, postgresql_using='gin',
               postgresql_ops={'content_text': 'gin_trgm_ops'}),)
-
 
 # 阶段任务表
 class StageTask(db.Model):
@@ -192,7 +190,6 @@ class TaskProgressUpdate(db.Model):
     task_id = db.Column(db.Integer, db.ForeignKey('stage_tasks.id'), nullable=False)
     progress = db.Column(db.Integer, nullable=False)  # 进度百分比
     description = db.Column(db.String(255), nullable=True)  # 更新内容说明
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)  # 更新时间
-
+    created_at = db.Column(db.DateTime, default=datetime.now)  # 更新时间
     # 关系
     task = db.relationship('StageTask', back_populates='progress_updates')

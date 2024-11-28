@@ -4,6 +4,8 @@ import sys
 import tempfile
 import time
 
+from sqlalchemy import text
+
 from config import app, db
 from flask import request, jsonify, redirect, url_for
 import jwt
@@ -19,7 +21,6 @@ app.register_blueprint(employee_bp, url_prefix='/api/employee')
 app.register_blueprint(projectplan_bp, url_prefix='/api/projectplan')
 
 app.register_blueprint(files_bp, url_prefix='/api/files')
-
 
 # 用户登录接口
 @app.route('/api/login', methods=['POST'])
@@ -81,4 +82,36 @@ if __name__ == '__main__':
         # print("环境变量:", os.environ)
         print("Python路径:", sys.executable)
         print("临时文件夹:", tempfile.gettempdir())
+
+        # 启用外键约束
+        db.session.execute(text('PRAGMA foreign_keys=ON'))
+        # 尝试直接创建FTS5表（不加载扩展）
+        try:
+            create_fts_table_sql = text("""
+                        CREATE VIRTUAL TABLE IF NOT EXISTS file_contents_fts 
+                        USING fts5(
+                            content,
+                            tokenize=porter
+                        )
+                    """)
+            db.session.execute(create_fts_table_sql)
+            db.session.commit()
+            print("成功创建FTS5表")
+        except Exception as e:
+            # 如果FTS5失败，尝试使用FTS4
+            try:
+                create_fts4_table_sql = text("""
+                            CREATE VIRTUAL TABLE IF NOT EXISTS file_contents_fts 
+                            USING fts4(
+                                content,
+                                tokenize=simple
+                            )
+                        """)
+                db.session.execute(create_fts4_table_sql)
+                db.session.commit()
+                print("成功创建FTS4表（FTS5不可用，已降级使用FTS4）")
+            except Exception as e2:
+                print(f"警告: 全文搜索表创建失败 - {str(e2)}")
+                print("将使用基础的LIKE查询作为备选方案")
+
     app.run(port=7777)

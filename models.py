@@ -4,7 +4,7 @@ from typing import Text
 
 import bcrypt
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import Index
+from sqlalchemy import Index, event, text
 
 db = SQLAlchemy()
 
@@ -43,6 +43,7 @@ class Project(db.Model):
     stages = db.relationship('ProjectStage', back_populates='project', lazy=True)
     updates = db.relationship('ProjectUpdate', back_populates='project')
 
+
 # 项目阶段表
 
 class ProjectStage(db.Model):
@@ -78,7 +79,7 @@ class ProjectUpdate(db.Model):
     project = db.relationship('Project', back_populates='updates')
 
 
-# 项目文件表
+# 修改ProjectFile模型
 class ProjectFile(db.Model):
     __tablename__ = 'project_files'
     id = db.Column(db.Integer, primary_key=True)
@@ -91,19 +92,16 @@ class ProjectFile(db.Model):
     file_path = db.Column(db.String(255), nullable=False)
     upload_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     upload_date = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    text_extracted = db.Column(db.Boolean, default=False)
 
     # 关联
     upload_user = db.relationship('User', backref='uploaded_files')
     project = db.relationship('Project', back_populates='files')
-    stage = db.relationship('ProjectStage', back_populates='stage_files')  # 修改为 stage_files
+    stage = db.relationship('ProjectStage', back_populates='stage_files')
     task = db.relationship('StageTask', backref='files')
-    content_text = db.Column(db.Text, nullable=True)
-    text_extracted = db.Column(db.Boolean, default=False)
-    # 创建文本内容的全文索引（如果数据库支持）
-    table_args = (
-        Index('idx_file_content',
-              content_text, postgresql_using='gin',
-              postgresql_ops={'content_text': 'gin_trgm_ops'}),)
+    content = db.relationship('FileContent', backref='file', uselist=False,
+                              cascade='all, delete-orphan')
+
 
 # 阶段任务表
 class StageTask(db.Model):
@@ -115,13 +113,14 @@ class StageTask(db.Model):
     description = db.Column(db.Text)
     due_date = db.Column(db.Date, nullable=False)
     status = db.Column(db.String(20), default='pending')  # 待处理、正在进行、已完成
-    progress = db.Column(db.Integer, default=0) #进度
+    progress = db.Column(db.Integer, default=0)  # 进度
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # 关系
     stage = db.relationship('ProjectStage', back_populates='tasks')
     progress_updates = db.relationship('TaskProgressUpdate', back_populates='task', cascade='all, delete-orphan')
+
 
 # 编辑时间跟踪表
 class EditTimeTracking(db.Model):
@@ -182,7 +181,7 @@ class ReportClockinDetail(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.now())
 
 
-#任务更新表
+# 任务更新表
 class TaskProgressUpdate(db.Model):
     __tablename__ = 'task_progress_updates'
 
@@ -193,3 +192,59 @@ class TaskProgressUpdate(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)  # 更新时间
     # 关系
     task = db.relationship('StageTask', back_populates='progress_updates')
+
+
+# 创建FTS5虚拟表的事件监听器
+def create_fts_table(target, connection, **kw):
+    connection.execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS file_contents_fts 
+        USING fts5(
+            content,
+            tokenize='porter unicode61'
+        )
+    """)
+
+
+# 文件内容全文搜索表 - 使用普通表存储
+class FileContent(db.Model):
+    __tablename__ = 'file_contents'
+
+    id = db.Column(db.Integer, primary_key=True)
+    file_id = db.Column(db.Integer, db.ForeignKey('project_files.id', ondelete='CASCADE'), unique=True)
+    content = db.Column(db.Text)
+
+    def after_insert(self, connection):
+        try:
+            # 尝试使用FTS5
+            stmt = text('INSERT INTO file_contents_fts (rowid, content) VALUES (:id, :content)')
+            connection.execute(stmt, {'id': self.id, 'content': self.content})
+        except Exception:
+            try:
+                # 如果失败，尝试使用FTS4
+                stmt = text('INSERT INTO file_contents_fts (docid, content) VALUES (:id, :content)')
+                connection.execute(stmt, {'id': self.id, 'content': self.content})
+            except Exception:
+                # 如果全文搜索不可用，就跳过索引创建
+                pass
+
+    def after_update(self, connection):
+        try:
+            stmt = text('UPDATE file_contents_fts SET content = :content WHERE rowid = :id')
+            connection.execute(stmt, {'content': self.content, 'id': self.id})
+        except Exception:
+            try:
+                stmt = text('UPDATE file_contents_fts SET content = :content WHERE docid = :id')
+                connection.execute(stmt, {'content': self.content, 'id': self.id})
+            except Exception:
+                pass
+
+    def after_delete(self, connection):
+        try:
+            stmt = text('DELETE FROM file_contents_fts WHERE rowid = :id')
+            connection.execute(stmt, {'id': self.id})
+        except Exception:
+            try:
+                stmt = text('DELETE FROM file_contents_fts WHERE docid = :id')
+                connection.execute(stmt, {'id': self.id})
+            except Exception:
+                pass

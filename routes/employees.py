@@ -28,6 +28,7 @@ def get_employee_id():
 def get_assigned_projects():
     employee_id = get_employee_id()
     projects = Project.query.filter_by(employee_id=employee_id).all()
+
     return jsonify([{
         'id': p.id,
         'name': p.name,
@@ -36,8 +37,30 @@ def get_assigned_projects():
         'deadline': p.deadline.strftime('%Y-%m-%d'),
         'progress': p.progress,
         'status': p.status,
-
+        'stages': [{
+            'id': s.id,
+            'name': s.name,
+            'description': s.description,
+            'start_date': s.start_date.strftime('%Y-%m-%d'),
+            'end_date': s.end_date.strftime('%Y-%m-%d'),
+            'progress': s.progress,
+            'status': s.status,
+            'tasks': [{
+                'id': t.id,
+                'name': t.name,
+                'description': t.description,
+                'due_date': t.due_date.strftime('%Y-%m-%d'),
+                'status': t.status,
+                'progress': t.progress,
+                'files': [{
+                    'id': f.id is not None,  # 检查文件是否有 ID
+                    # 如果没做索引，content为空，却有文件，那么前端就会判断错误没有文件，所以前端按照是否有 ID 来判断是否有文件
+                    'has_content': f.content is not None  # 检查文件是否有内容
+                } for f in t.files]
+            } for t in s.tasks]
+        } for s in p.stages]
     } for p in projects])
+
 
 
 # 2024年11月1日09:05:36

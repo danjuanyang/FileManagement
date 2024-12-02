@@ -243,6 +243,65 @@ def check_monthly_report(current_user):
 
 
 # 修改提交接口，添加验证
+# @employee_bp.route('/fill-card', methods=['POST'])
+# @token_required
+# def report_clock_in(current_user):
+#     # 先检查是否已经提交过
+#     if ReportClockin.has_reported_this_month(current_user.id):
+#         return jsonify({
+#             'error': '本月已提交过补卡申请，不能重复提交',
+#         }), 400
+#
+#     data = request.get_json()
+#     dates = data.get('dates', [])
+#
+#     if len(dates) > 3:
+#         return jsonify({'error': '最多只能选择3天'}), 400
+#
+#     try:
+#         # 创建补卡记录
+#         report = ReportClockin(
+#             employee_id=current_user.id,
+#             report_date=datetime.now()
+#         )
+#         db.session.add(report)
+#         db.session.flush()
+#
+#         # 添加补卡明细
+#         reported_dates = []
+#         for date_str in dates:
+#             try:
+#                 date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+#                 weekday = date_obj.strftime('%A')
+#
+#                 detail = ReportClockinDetail(
+#                     report_id=report.id,
+#                     clockin_date=date_obj.date(),
+#                     weekday=weekday
+#                 )
+#                 db.session.add(detail)
+#
+#                 reported_dates.append({
+#                     'date': date_str,
+#                     'weekday': weekday
+#                 })
+#             except ValueError:
+#                 db.session.rollback()
+#                 return jsonify({'error': f'无效的日期格式: {date_str}'}), 400
+#
+#         db.session.commit()
+#         return jsonify({
+#             'message': '补卡提交成功',
+#             'report_id': report.id,
+#             'employee_id': current_user.id,
+#             'employee_name': current_user.name if hasattr(current_user, 'name') else current_user.username,
+#             'reported_dates': reported_dates
+#         }), 200
+#
+#     except Exception as e:
+#         db.session.rollback()
+#         return jsonify({'error': str(e)}), 500
+
 @employee_bp.route('/fill-card', methods=['POST'])
 @token_required
 def report_clock_in(current_user):
@@ -253,9 +312,9 @@ def report_clock_in(current_user):
         }), 400
 
     data = request.get_json()
-    dates = data.get('dates', [])
+    dates_data = data.get('dates', [])
 
-    if len(dates) > 3:
+    if len(dates_data) > 3:
         return jsonify({'error': '最多只能选择3天'}), 400
 
     try:
@@ -269,21 +328,25 @@ def report_clock_in(current_user):
 
         # 添加补卡明细
         reported_dates = []
-        for date_str in dates:
+        for date_item in dates_data:
             try:
+                date_str = date_item['date']
+                remarks = date_item['remarks']
                 date_obj = datetime.strptime(date_str, '%Y-%m-%d')
                 weekday = date_obj.strftime('%A')
 
                 detail = ReportClockinDetail(
                     report_id=report.id,
                     clockin_date=date_obj.date(),
-                    weekday=weekday
+                    weekday=weekday,
+                    remarks=remarks
                 )
                 db.session.add(detail)
 
                 reported_dates.append({
                     'date': date_str,
-                    'weekday': weekday
+                    'weekday': weekday,
+                    'remarks': remarks
                 })
             except ValueError:
                 db.session.rollback()
@@ -303,7 +366,42 @@ def report_clock_in(current_user):
         return jsonify({'error': str(e)}), 500
 
 
+
+
+
 # 获取补卡记录
+# @employee_bp.route('/report-data', methods=['GET'])
+# @token_required
+# def get_report_data(current_user):
+#     # 获取当前月份的开始和结束时间
+#     today = datetime.now()
+#     start_of_month = datetime(today.year, today.month, 1)
+#     end_of_month = datetime(today.year, today.month + 1, 1) if today.month < 12 else datetime(today.year + 1, 1, 1)
+#
+#     # 查询本月的补卡记录
+#     report = ReportClockin.query.filter(
+#         ReportClockin.employee_id == current_user.id,
+#         ReportClockin.report_date >= start_of_month,
+#         ReportClockin.report_date < end_of_month
+#     ).first()
+#
+#     if not report:
+#         return jsonify({'error': '未找到补卡记录'}), 404
+#
+#     # 获取补卡明细
+#     reported_dates = [{
+#         'date': detail.clockin_date.strftime('%Y-%m-%d'),
+#         'weekday': detail.weekday
+#     } for detail in report.details]
+#
+#     return jsonify({
+#         'report_date': report.report_date,
+#         'employee_name': current_user.name if hasattr(current_user, 'name') else current_user.username,
+#         'employee_id': current_user.id,
+#         'reported_dates': reported_dates
+#     })
+
+
 @employee_bp.route('/report-data', methods=['GET'])
 @token_required
 def get_report_data(current_user):
@@ -322,10 +420,11 @@ def get_report_data(current_user):
     if not report:
         return jsonify({'error': '未找到补卡记录'}), 404
 
-    # 获取补卡明细
+    # 获取补卡明细（现在包含备注信息）
     reported_dates = [{
         'date': detail.clockin_date.strftime('%Y-%m-%d'),
-        'weekday': detail.weekday
+        'weekday': detail.weekday,
+        'remarks': detail.remarks
     } for detail in report.details]
 
     return jsonify({
@@ -334,7 +433,6 @@ def get_report_data(current_user):
         'employee_id': current_user.id,
         'reported_dates': reported_dates
     })
-
 
 #2024年11月25日16:59:02
 

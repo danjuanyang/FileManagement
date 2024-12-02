@@ -178,6 +178,7 @@ class ReportClockinDetail(db.Model):
     report_id = db.Column(db.Integer, db.ForeignKey('report_clockins.id'), nullable=False)
     clockin_date = db.Column(db.Date, nullable=False)  # 补卡日期
     weekday = db.Column(db.String(20), nullable=False)  # 星期几
+    remarks = db.Column(db.String(200))  # 补卡备注
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.now())
 
 

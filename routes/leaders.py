@@ -284,7 +284,8 @@ def get_report_clockin_data(current_user):
                 'report_date': report.report_date.strftime('%Y-%m-%d %H:%M:%S'),
                 'dates': [{
                     'date': detail.clockin_date.strftime('%Y-%m-%d'),
-                    'weekday': detail.weekday
+                    'weekday': detail.weekday,
+                    'remarks': detail.remarks
                 } for detail in details]
             })
         return jsonify({

@@ -30,7 +30,12 @@ def get_project_stages(project_id):
             'description': task.description,
             'dueDate': task.due_date.isoformat(),
             'status': task.status,
-            'progress': task.progress
+            'progress': task.progress,
+            'files': [{
+                'id': f.id is not None,  # 检查文件是否有 ID
+                # 如果没做索引，content为空，却有文件，那么前端就会判断错误没有文件，所以前端按照是否有 ID 来判断是否有文件
+                'has_content': f.content is not None  # 检查文件是否有内容
+            } for f in task.files]
         } for task in stage.tasks]
     } for stage in stages])
 

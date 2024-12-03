@@ -296,3 +296,143 @@ def get_report_clockin_data(current_user):
         return jsonify({'error': '无效的日期格式'}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+
+# 项目列表
+# @leader_bp.route('/projectlist', methods=['GET'])
+# @token_required
+# def get_project_list(current_user):
+#     if current_user.role != 1:
+#         return jsonify({'error': '权限不足'}), 403
+#
+#     try:
+#         # Retrieve all projects
+#         projects = Project.query.all()
+#
+#         # Prepare the response data
+#         project_list = []
+#         for project in projects:
+#             # Retrieve stages for each project
+#             stages = ProjectStage.query.filter_by(project_id=project.id).all()
+#             stage_list = []
+#             for stage in stages:
+#                 # Retrieve tasks for each stage
+#                 tasks = StageTask.query.filter_by(stage_id=stage.id).all()
+#                 task_list = [{
+#                     'id': task.id,
+#                     'name': task.name,
+#                     'description': task.description,
+#                     'due_date': task.due_date.strftime('%Y-%m-%d') if task.due_date else None,
+#                     'status': task.status,  # Ensure task status is included
+#                     'progress': task.progress
+#                 } for task in tasks]
+#
+#                 stage_list.append({
+#                     'id': stage.id,
+#                     'name': stage.name,
+#                     'description': stage.description,
+#                     'start_date': stage.start_date.strftime('%Y-%m-%d') if stage.start_date else None,
+#                     'end_date': stage.end_date.strftime('%Y-%m-%d') if stage.end_date else None,
+#                     'progress': stage.progress,
+#                     'status': stage.status,  # Ensure stage status is included
+#                     'tasks': task_list
+#                 })
+#
+#             # Retrieve files for each project
+#             files = ProjectFile.query.filter_by(project_id=project.id).all()
+#             file_list = [{
+#                 'id': file.id,
+#                 'file_name': file.file_name,
+#                 'file_type': file.file_type,
+#                 'file_path': file.file_path,
+#                 'upload_user': file.upload_user.username,
+#                 'upload_date': file.upload_date.strftime('%Y-%m-%d %H:%M:%S')
+#             } for file in files]
+#
+#             project_list.append({
+#                 'id': project.id,
+#                 'name': project.name,
+#                 'description': project.description,
+#                 'employee': project.employee.username if project.employee else None,
+#                 'start_date': project.start_date.strftime('%Y-%m-%d') if project.start_date else None,
+#                 'deadline': project.deadline.strftime('%Y-%m-%d') if project.deadline else None,
+#                 'progress': project.progress,
+#                 'status': project.status,
+#                 'stages': stage_list,
+#                 'files': file_list
+#             })
+#
+#         return jsonify({'projects': project_list})
+#
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
+
+
+@leader_bp.route('/projectlist', methods=['GET'])
+@token_required
+def get_project_list(current_user):
+    if current_user.role != 1:
+        return jsonify({'error': '权限不足'}), 403
+
+    try:
+        # 检索所有项目
+        projects = Project.query.all()
+
+        # 准备响应数据
+        project_list = []
+        for project in projects:
+            # 检索每个项目的阶段
+            stages = ProjectStage.query.filter_by(project_id=project.id).all()
+            stage_list = []
+            for stage in stages:
+                # 检索每个阶段的任务
+                tasks = StageTask.query.filter_by(stage_id=stage.id).all()
+                task_list = [{
+                    'id': task.id,
+                    'name': task.name,
+                    'description': task.description,
+                    'due_date': task.due_date.strftime('%Y-%m-%d') if task.due_date else None,
+                    'status': task.status,
+                    'progress': task.progress
+                } for task in tasks]
+
+                stage_list.append({
+                    'id': stage.id,
+                    'name': stage.name,
+                    'description': stage.description,
+                    'start_date': stage.start_date.strftime('%Y-%m-%d') if stage.start_date else None,
+                    'end_date': stage.end_date.strftime('%Y-%m-%d') if stage.end_date else None,
+                    'progress': stage.progress,
+                    'status': stage.status,
+                    'tasks': task_list
+                })
+
+            # 检索每个项目的文件
+            files = ProjectFile.query.filter_by(project_id=project.id).all()
+            file_list = [{
+                'id': file.id,
+                'file_name': file.file_name,
+                'file_type': file.file_type,
+                'file_path': file.file_path,
+                'upload_user': file.upload_user.username,
+                'upload_date': file.upload_date.strftime('%Y-%m-%d %H:%M:%S')
+            } for file in files]
+
+            project_list.append({
+                'id': project.id,
+                'name': project.name,
+                'description': project.description,
+                'employee': project.employee.username if project.employee else None,
+                'start_date': project.start_date.strftime('%Y-%m-%d') if project.start_date else None,
+                'deadline': project.deadline.strftime('%Y-%m-%d') if project.deadline else None,
+                'progress': project.progress,
+                'status': project.status,
+                'stages': stage_list,
+                'files': file_list
+            })
+
+        return jsonify({'projects': project_list})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

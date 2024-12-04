@@ -5,6 +5,6 @@ Flask-Migrate
 Flask-Script
 Flask-RESTful
 bcrypt
-PyPDF2
 Document
 textract
+PyMuPDF

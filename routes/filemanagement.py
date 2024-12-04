@@ -17,7 +17,7 @@ from models import db, Project, ProjectFile, ProjectStage, User, StageTask, File
 from auth import get_employee_id
 
 # 搜索
-from .file_indexer import update_file_index, get_mime_type
+
 from .file_indexer import update_file_index, get_mime_type, create_file_index
 
 # 获取Python解释器所在目录
@@ -277,398 +277,12 @@ def upload_task_file(project_id, stage_id, task_id):
 
 # 搜索文件
 # 2024年11月28日14:09:03
-# 搜索
-# @files_bp.route('/search', methods=['GET'])
-# def search_files():
-#     try:
-#         search_query = request.args.get('query', '').strip()
-#         search_type = request.args.get('type', 'all')  # 获取搜索类型参数
-#
-#         if not search_query:
-#             return jsonify({'error': 'Search query is required'}), 400
-#
-#         # 构建基础查询
-#         base_query = ProjectFile.query.options(
-#             joinedload(ProjectFile.project),
-#             joinedload(ProjectFile.stage),
-#             joinedload(ProjectFile.task),
-#             joinedload(ProjectFile.upload_user),
-#             joinedload(ProjectFile.content)  # 确保加载文件内容
-#         )
-#
-#         # 定义搜索条件列表
-#         search_conditions = []
-#
-#         # 根据搜索类型构建查询条件
-#         if search_type in ['all', 'filename']:
-#             search_conditions.extend([
-#                 ProjectFile.original_name.ilike(f'%{search_query}%'),
-#                 Project.name.ilike(f'%{search_query}%')
-#             ])
-#
-#         if search_type in ['all', 'content']:
-#             # 尝试使用全文搜索
-#             try:
-#                 # 先尝试FTS5
-#                 content_search_sql = text("""
-#                     SELECT DISTINCT file_id FROM file_contents
-#                     WHERE id IN (
-#                         SELECT rowid FROM file_contents_fts
-#                         WHERE file_contents_fts MATCH :query
-#                     )
-#                 """)
-#                 content_matches = db.session.execute(
-#                     content_search_sql,
-#                     {'query': search_query}
-#                 ).fetchall()
-#
-#                 if content_matches:
-#                     file_ids = [match[0] for match in content_matches]
-#                     search_conditions.append(ProjectFile.id.in_(file_ids))
-#             except Exception as e:
-#                 print(f"FTS5 search failed: {e}")
-#                 try:
-#                     # 如果FTS5失败，尝试FTS4
-#                     content_search_sql = text("""
-#                         SELECT DISTINCT file_id FROM file_contents
-#                         WHERE id IN (
-#                             SELECT docid FROM file_contents_fts
-#                             WHERE content MATCH :query
-#                         )
-#                     """)
-#                     content_matches = db.session.execute(
-#                         content_search_sql,
-#                         {'query': search_query}
-#                     ).fetchall()
-#
-#                     if content_matches:
-#                         file_ids = [match[0] for match in content_matches]
-#                         search_conditions.append(ProjectFile.id.in_(file_ids))
-#                 except Exception as e:
-#                     print(f"FTS4 search failed: {e}")
-#                     # 如果全文搜索都失败，使用LIKE查询作为后备方案
-#                     search_conditions.append(FileContent.content.ilike(f'%{search_query}%'))
-#
-#         # 组合所有搜索条件
-#         if search_conditions:
-#             base_query = base_query.join(Project). \
-#                 outerjoin(FileContent). \
-#                 filter(or_(*search_conditions))
-#
-#         # 执行查询
-#         search_results = base_query.all()
-#
-#         # 处理结果
-#         results = []
-#         for file in search_results:
-#             try:
-#                 file_path = os.path.join(current_app.root_path, file.file_path)
-#                 file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
-#
-#                 result = {
-#                     'id': file.id,
-#                     'fileName': file.file_name,
-#                     'originalName': file.original_name,
-#                     'fileType': file.file_type,
-#                     'fileSize': file_size,
-#                     'uploadTime': file.upload_date.isoformat(),
-#                     'uploader': file.upload_user.username if file.upload_user else 'Unknown',
-#                     'projectName': file.project.name if file.project else None,
-#                     'stageName': file.stage.name if file.stage else None,
-#                     'taskName': file.task.name if file.task else None,
-#                 }
-#
-#                 # 如果是内容搜索，添加内容预览
-#                 if search_type in ['all', 'content'] and file.content:
-#                     result['contentPreview'] = get_content_preview(
-#                         file.content.content,
-#                         search_query
-#                     )
-#
-#                 results.append(result)
-#             except Exception as e:
-#                 print(f"处理文件 {file.id} 时出错: {str(e)}")
-#                 continue
-#
-#         return jsonify({
-#             'results': results,
-#             'total': len(results)
-#         })
-#
-#     except Exception as e:
-#         print(f"搜索错误: {str(e)}")
-#         return jsonify({'error': str(e)}), 500
-#
-#
-# # 优化内容预览函数
-# def get_content_preview(content, query, context_length=100):
-#     """获取匹配内容的上下文预览"""
-#     if not content or not query:
-#         return None
-#
-#     try:
-#         # 转换为小写进行不区分大小写的搜索
-#         content_lower = content.lower()
-#         query_lower = query.lower()
-#
-#         # 查找匹配位置
-#         index = content_lower.find(query_lower)
-#         if index == -1:
-#             return None
-#
-#         # 计算预览窗口的起始和结束位置
-#         start = max(0, index - context_length // 2)
-#         end = min(len(content), index + len(query) + context_length // 2)
-#
-#         # 调整起始位置到单词边界（如果可能）
-#         while start > 0 and content[start - 1].isalnum():
-#             start -= 1
-#
-#         # 调整结束位置到单词边界（如果可能）
-#         while end < len(content) - 1 and content[end].isalnum():
-#             end += 1
-#
-#         # 构建预览文本
-#         preview = content[start:end].strip()
-#
-#         # 添加省略号标记
-#         if start > 0:
-#             preview = f"...{preview}"
-#         if end < len(content):
-#             preview = f"{preview}..."
-#
-#         return preview
-#     except Exception as e:
-#         print(f"生成内容预览时出错: {str(e)}")
-#         return None
-
 # 搜索文件
 # contentPreview 字段只有在满足两个条件时才会被添加到结果中：
 # 1文件必须有关联的内容（即 file.content 不为 None）
 # 2搜索关键词必须在文件内容中找到
-#
-# @files_bp.route('/search', methods=['GET'])
-# def search_files():
-#     try:
-#         search_query = request.args.get('query', '').strip()
-#         if not search_query:
-#             return jsonify({'error': 'Search query is required'}), 400
-#
-#         # 构建基础查询，预加载所有需要的关系
-#         base_query = ProjectFile.query.options(
-#             joinedload(ProjectFile.project),
-#             joinedload(ProjectFile.stage),
-#             joinedload(ProjectFile.task),
-#             joinedload(ProjectFile.upload_user),
-#             joinedload(ProjectFile.content)
-#         )
-#
-#         # 构建搜索条件，包含 ProjectFile 的所有相关字段
-#         search_conditions = [
-#             ProjectFile.original_name.ilike(f'%{search_query}%'),
-#             ProjectFile.file_name.ilike(f'%{search_query}%'),
-#             ProjectFile.file_type.ilike(f'%{search_query}%'),
-#             ProjectFile.file_path.ilike(f'%{search_query}%'),
-#             Project.name.ilike(f'%{search_query}%'),
-#             ProjectStage.name.ilike(f'%{search_query}%'),
-#             StageTask.name.ilike(f'%{search_query}%'),
-#             User.username.ilike(f'%{search_query}%'),
-#             FileContent.content.ilike(f'%{search_query}%')
-#         ]
-#
-#         # 组合查询
-#         search_results = base_query\
-#             .join(Project)\
-#             .join(ProjectStage)\
-#             .join(StageTask)\
-#             .join(User, ProjectFile.upload_user_id == User.id)\
-#             .outerjoin(FileContent)\
-#             .filter(or_(*search_conditions))\
-#             .all()
-#
-#         # 处理结果
-#         results = []
-#         for file in search_results:
-#             try:
-#                 # 获取文件大小
-#                 file_path = os.path.join(current_app.root_path, file.file_path)
-#                 file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
-#
-#                 result = {
-#                     'id': file.id,
-#                     'fileName': file.file_name,
-#                     'originalName': file.original_name,
-#                     'fileType': file.file_type,
-#                     'fileSize': file_size,
-#                     'uploadTime': file.upload_date.isoformat(),
-#                     'uploader': file.upload_user.username if file.upload_user else 'Unknown',
-#                     'projectName': file.project.name if file.project else None,
-#                     'stageName': file.stage.name if file.stage else None,
-#                     'taskName': file.task.name if file.task else None,
-#                 }
-#
-#                 # 如果文件有内容且内容中包含搜索词，添加内容预览
-#                 if file.content and search_query.lower() in file.content.content.lower():
-#                     result['contentPreview'] = get_content_preview(
-#                         file.content.content,
-#                         search_query,
-#                         context_length=150
-#                     )
-#
-#                 results.append(result)
-#             except Exception as e:
-#                 print(f"处理文件 {file.id} 时出错: {str(e)}")
-#                 continue
-#
-#         return jsonify({
-#             'results': results,
-#             'total': len(results)
-#         })
-#
-#     except Exception as e:
-#         print(f"搜索错误: {str(e)}")
-#         return jsonify({'error': str(e)}), 500
-#
-#
-# def get_content_preview(content, query, context_length=150):
-#     """
-#     获取匹配内容的上下文预览，突出显示匹配的文本
-#     """
-#     if not content or not query:
-#         return None
-#
-#     try:
-#         # 转换为小写进行不区分大小写的搜索
-#         content_lower = content.lower()
-#         query_lower = query.lower()
-#
-#         # 查找匹配位置
-#         index = content_lower.find(query_lower)
-#         if index == -1:
-#             return None
-#
-#         # 计算预览窗口的起始和结束位置
-#         start = max(0, index - context_length // 2)
-#         end = min(len(content), index + len(query) + context_length // 2)
-#
-#         # 调整起始位置到单词边界（如果可能）
-#         while start > 0 and content[start - 1].isalnum():
-#             start -= 1
-#
-#         # 调整结束位置到单词边界（如果可能）
-#         while end < len(content) - 1 and content[end].isalnum():
-#             end += 1
-#
-#         # 构建预览文本
-#         preview = content[start:end].strip()
-#
-#         # 添加省略号标记
-#         if start > 0:
-#             preview = f"...{preview}"
-#         if end < len(content):
-#             preview = f"{preview}..."
-#
-#         return preview
-#
-#     except Exception as e:
-#         print(f"生成内容预览时出错: {str(e)}")
-#         return None
-
 
 # 搜索
-# 不管有没有内容都展示内容预览
-# @files_bp.route('/search', methods=['GET'])
-# def search_files():
-#     try:
-#         search_query = request.args.get('query', '').strip()
-#         if not search_query:
-#             return jsonify({'error': 'Search query is required'}), 400
-#
-#         # 构建基础查询，预加载所有需要的关系
-#         base_query = ProjectFile.query.options(
-#             joinedload(ProjectFile.project),
-#             joinedload(ProjectFile.stage),
-#             joinedload(ProjectFile.task),
-#             joinedload(ProjectFile.upload_user),
-#             joinedload(ProjectFile.content)
-#         )
-#
-#         # 构建搜索条件，包含 ProjectFile 的所有相关字段
-#         search_conditions = [
-#             ProjectFile.original_name.ilike(f'%{search_query}%'),
-#             ProjectFile.file_name.ilike(f'%{search_query}%'),
-#             ProjectFile.file_type.ilike(f'%{search_query}%'),
-#             ProjectFile.file_path.ilike(f'%{search_query}%'),
-#             Project.name.ilike(f'%{search_query}%'),
-#             ProjectStage.name.ilike(f'%{search_query}%'),
-#             StageTask.name.ilike(f'%{search_query}%'),
-#             User.username.ilike(f'%{search_query}%'),
-#             FileContent.content.ilike(f'%{search_query}%')
-#         ]
-#
-#         # 组合查询
-#         search_results = base_query\
-#             .join(Project)\
-#             .join(ProjectStage)\
-#             .join(StageTask)\
-#             .join(User, ProjectFile.upload_user_id == User.id)\
-#             .outerjoin(FileContent)\
-#             .filter(or_(*search_conditions))\
-#             .all()
-#
-#         # 处理结果
-#         results = []
-#         for file in search_results:
-#             try:
-#                 # 获取文件大小
-#                 file_path = os.path.join(current_app.root_path, file.file_path)
-#                 file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
-#
-#                 result = {
-#                     'id': file.id,
-#                     'fileName': file.file_name,
-#                     'originalName': file.original_name,
-#                     'fileType': file.file_type,
-#                     'fileSize': file_size,
-#                     'uploadTime': file.upload_date.isoformat(),
-#                     'uploader': file.upload_user.username if file.upload_user else 'Unknown',
-#                     'projectName': file.project.name if file.project else None,
-#                     'stageName': file.stage.name if file.stage else None,
-#                     'taskName': file.task.name if file.task else None,
-#                 }
-#
-#                 # 添加内容预览字段，即使内容为空或未找到匹配
-#                 result['contentPreview'] = None
-#                 if file.content:
-#                     preview = get_content_preview(
-#                         file.content.content,
-#                         search_query,
-#                         context_length=150
-#                     )
-#                     if preview:
-#                         result['contentPreview'] = preview
-#                     else:
-#                         # 文件有内容但未找到匹配
-#                         result['contentPreview'] = "未找到匹配内容"
-#                 else:
-#                     # 文件没有提取的内容
-#                     result['contentPreview'] = "未提取任何内容"
-#
-#                 results.append(result)
-#             except Exception as e:
-#                 print(f"处理文件 {file.id} 时出错: {str(e)}")
-#                 continue
-#
-#         return jsonify({
-#             'results': results,
-#             'total': len(results)
-#         })
-#
-#     except Exception as e:
-#         print(f"搜索错误: {str(e)}")
-#         return jsonify({'error': str(e)}), 500
-
-
 @files_bp.route('/search', methods=['GET'])
 def search_files():
     try:
@@ -696,13 +310,13 @@ def search_files():
             FileContent.content.ilike(f'%{search_query}%')
         ]
 
-        search_results = base_query\
-            .join(Project)\
-            .join(ProjectStage)\
-            .join(StageTask)\
-            .join(User, ProjectFile.upload_user_id == User.id)\
-            .outerjoin(FileContent)\
-            .filter(or_(*search_conditions))\
+        search_results = base_query \
+            .join(Project) \
+            .join(ProjectStage) \
+            .join(StageTask) \
+            .join(User, ProjectFile.upload_user_id == User.id) \
+            .outerjoin(FileContent) \
+            .filter(or_(*search_conditions)) \
             .all()
 
         results = []
@@ -752,10 +366,6 @@ def search_files():
     except Exception as e:
         print(f"搜索错误: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
-
-
-
 
 
 def get_content_preview(content, query, context_length=150):
@@ -833,8 +443,6 @@ def highlight_text(text, query):
     except Exception as e:
         print(f"高亮处理错误: {str(e)}")
         return text
-
-
 
 
 #  文件删除接口
@@ -940,9 +548,6 @@ def get_user_info_from_token():
         return None
 
 
-
-
-
 # def get_content_preview(content, query, context_length=100):
 #     """获取匹配内容的上下文预览"""
 #     if not content:
@@ -967,10 +572,8 @@ def get_user_info_from_token():
 #         return None
 
 
-
 #  获取带高亮标记的内容预览
 def get_content_preview(content, query, context_length=150):
-
     if not content or not query:
         return None
 

@@ -5,7 +5,7 @@ import tempfile
 import time
 
 from sqlalchemy import text
-
+# from sqlalchemy import Flask_SQLAlchemy, text
 from config import app, db
 from flask import request, jsonify, redirect, url_for
 import jwt
@@ -114,4 +114,4 @@ if __name__ == '__main__':
                 print(f"警告: 全文搜索表创建失败 - {str(e2)}")
                 print("将使用基础的LIKE查询作为备选方案")
 
-    app.run(port=7777)
+    app.run(host='0.0.0.0', port=6543, debug=False)

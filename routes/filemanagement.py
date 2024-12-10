@@ -28,6 +28,16 @@ ALLOWED_EXTENSIONS = {'doc', 'docx', 'pdf', 'xls', 'xlsx', 'txt', 'zip', 'rar'}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 BASE_UPLOAD_FOLDER = os.path.join(python_dir, 'uploads')  # 基础上传目录
 
+
+# 群晖路径
+# python_dir  = '/volume1/web/FileManagementFolder/db'
+# UPLOAD_FOLDER = '/volume1/web/FileManagementFolder/uploads'
+# ALLOWED_EXTENSIONS = {'doc', 'docx', 'pdf', 'xls', 'xlsx', 'txt', 'zip', 'rar'}
+# MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+# BASE_UPLOAD_FOLDER = os.path.join(python_dir, 'uploads')  # 基础上传目录
+
+
+
 files_bp = Blueprint('files', __name__)
 CORS(files_bp)
 

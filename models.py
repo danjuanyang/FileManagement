@@ -32,7 +32,7 @@ class Project(db.Model):
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text)
     employee_id = db.Column(db.Integer, db.ForeignKey('users.id'))
-    start_date = db.Column(db.DateTime, default=datetime.utcnow)
+    start_date = db.Column(db.DateTime, default=datetime.now)
     deadline = db.Column(db.DateTime, nullable=False)
     progress = db.Column(db.Float, default=0.0)  # 0-100
     status = db.Column(db.String(20), default='pending')  # 待处理、正在干、已完成
@@ -114,8 +114,8 @@ class StageTask(db.Model):
     due_date = db.Column(db.Date, nullable=False)
     status = db.Column(db.String(20), default='pending')  # 待处理、正在进行、已完成
     progress = db.Column(db.Integer, default=0)  # 进度
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
     # 关系
     stage = db.relationship('ProjectStage', back_populates='tasks')

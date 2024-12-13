@@ -20,6 +20,7 @@ from auth import get_employee_id
 
 from .file_indexer import update_file_index, get_mime_type, create_file_index
 
+# 测试开发 使用本路径
 # 获取Python解释器所在目录
 python_dir = os.path.dirname(sys.executable)
 # 设置上传目录为程序根目录下文件夹

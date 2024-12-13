@@ -61,7 +61,7 @@ def create_project_stage():
     if tracking_id:
         tracking = EditTimeTracking.query.get(tracking_id)
         if tracking:
-            tracking.end_time = datetime.utcnow()
+            tracking.end_time = datetime.now()
             tracking.duration = int((tracking.end_time - tracking.start_time).total_seconds())
             tracking.stage_id = stage.id
 
@@ -116,7 +116,7 @@ def create_stage_task(stage_id):
     if tracking_id:
         tracking = EditTimeTracking.query.get(tracking_id)
         if tracking:
-            tracking.end_time = datetime.utcnow()
+            tracking.end_time = datetime.now()
             tracking.duration = int((tracking.end_time - tracking.start_time).total_seconds())
             tracking.task_id = task.id
 
@@ -131,11 +131,22 @@ def update_task(task_id):
     task = StageTask.query.get_or_404(task_id)
     data = request.get_json()
 
+    tracking_id = data.pop('trackingId', None)
+
     task.name = data.get('name', task.name)
     task.description = data.get('description', task.description)
     task.due_date = datetime.strptime(data['dueDate'], '%Y-%m-%d') if 'dueDate' in data else task.due_date
     task.status = data.get('status', task.status)
     task.progress = data.get('progress', task.progress)
+
+    # 2024年12月12日11:50:37
+    # 如果有追踪 ID，更新编辑时间记录
+    if tracking_id:
+        tracking = EditTimeTracking.query.get(tracking_id)
+        if tracking:
+            tracking.end_time = datetime.now()
+            tracking.duration = int((tracking.end_time - tracking.start_time).total_seconds())
+            tracking.task_id = task.id
 
     db.session.commit()
 
@@ -160,6 +171,7 @@ def delete_task(task_id):
     return jsonify({'message': '任务删除成功'}), 200
 
 
+# 更新阶段进度和状态
 def update_stage_progress(stage_id):
     stage = ProjectStage.query.get(stage_id)
     if not stage.tasks:
@@ -211,8 +223,8 @@ def start_edit_tracking():
         project_id=data['projectId'],
         user_id=user_id,
         edit_type=data['editType'],
-        start_time=datetime.utcnow(),
-        end_time=datetime.utcnow(),  # 将在编辑结束时更新
+        start_time=datetime.now(),
+        end_time=datetime.now(),  # 将在编辑结束时更新
         duration=0,  # 将在编辑结束时计算
         stage_id=data.get('stageId'),
         task_id=data.get('taskId')
@@ -227,8 +239,11 @@ def start_edit_tracking():
 @projectplan_bp.route('/tracking/end/<int:tracking_id>', methods=['PUT'])
 def end_edit_tracking(tracking_id):
     tracking = EditTimeTracking.query.get_or_404(tracking_id)
-    tracking.end_time = datetime.utcnow()
+    tracking.end_time = datetime.now()
     tracking.duration = int((tracking.end_time - tracking.start_time).total_seconds())
 
     db.session.commit()
     return jsonify({'message': 'Tracking ended successfully'}), 200
+
+
+

@@ -8,7 +8,8 @@ from flask import Blueprint, request, jsonify
 from flask_cors import CORS
 
 from config import app
-from models import db, Project, ProjectFile, ProjectUpdate, ProjectStage, User, ReportClockinDetail, ReportClockin, StageTask, TaskProgressUpdate
+from models import db, Project, ProjectFile, ProjectUpdate, ProjectStage, User, ReportClockinDetail, ReportClockin, \
+    StageTask, TaskProgressUpdate, EditTimeTracking
 from auth import get_employee_id
 from routes.filemanagement import allowed_file, MAX_FILE_SIZE, generate_unique_filename, create_upload_path
 
@@ -478,3 +479,134 @@ def get_task_progress_updates(task_id):
         'description': update.description,
         'created_at': update.created_at.isoformat()
     } for update in updates])
+
+
+
+
+# 2024年12月13日10:05:12
+# 检测任务编辑时间
+@employee_bp.route('/tasks/<int:task_id>/edit-time', methods=['GET'])
+@token_required  # 确保使用身份验证装饰器
+def get_task_edit_time(current_user, task_id):
+    try:
+        # 首先验证任务是否存在
+        task = StageTask.query.get_or_404(task_id)
+
+        # 获取此任务的所有编辑时间记录
+        edit_records = EditTimeTracking.query.filter_by(
+            task_id=task_id,
+            edit_type='task'
+        ).all()
+
+        # 计算总持续时间
+        total_duration = sum(record.duration for record in edit_records)
+
+        # 获取详细的编辑历史记录
+        edit_history = [{
+            'start_time': record.start_time.isoformat(),
+            'end_time': record.end_time.isoformat(),
+            'duration': record.duration,
+            'user_id': record.user_id
+        } for record in edit_records]
+
+        return jsonify({
+            'task_id': task_id,
+            'duration': total_duration,
+            'edit_history': edit_history,
+            'edit_count': len(edit_records)
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# 获取阶段编辑时间
+@employee_bp.route('/stages/<int:stage_id>/edit-time', methods=['GET'])
+@token_required
+def get_stage_edit_time(current_user, stage_id):
+    try:
+        # 获取此阶段的所有编辑时间记录
+        edit_records = EditTimeTracking.query.filter_by(
+            stage_id=stage_id,
+            edit_type='stage'
+        ).all()
+
+        total_duration = sum(record.duration for record in edit_records)
+
+        edit_history = [{
+            'start_time': record.start_time.isoformat(),
+            'end_time': record.end_time.isoformat(),
+            'duration': record.duration,
+            'user_id': record.user_id
+        } for record in edit_records]
+
+        return jsonify({
+            'stage_id': stage_id,
+            'duration': total_duration,
+            'edit_history': edit_history,
+            'edit_count': len(edit_records)
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# 获取项目总编辑时间
+@employee_bp.route('/projects/<int:project_id>/total-edit-time', methods=['GET'])
+@token_required
+def get_project_total_edit_time(current_user, project_id):
+    try:
+        # 获取此项目的所有编辑时间记录
+        edit_records = EditTimeTracking.query.filter_by(
+            project_id=project_id
+        ).all()
+
+        # 计算不同类型的总计
+        task_duration = sum(record.duration for record in edit_records if record.edit_type == 'task')
+        stage_duration = sum(record.duration for record in edit_records if record.edit_type == 'stage')
+        total_duration = task_duration + stage_duration
+
+        # 获取每个用户的统计数据
+        user_stats = {}
+        for record in edit_records:
+            if record.user_id not in user_stats:
+                user_stats[record.user_id] = 0
+            user_stats[record.user_id] += record.duration
+
+        return jsonify({
+            'project_id': project_id,
+            'total_duration': total_duration,
+            'task_duration': task_duration,
+            'stage_duration': stage_duration,
+            'user_stats': user_stats,
+            'edit_count': len(edit_records)
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# 用于计算编辑时间统计信息
+def calculate_edit_stats(records):
+    if not records:
+        return {
+            'total_duration': 0,
+            'average_duration': 0,
+            'edit_count': 0,
+            'last_edit': None
+        }
+
+    total_duration = sum(record.duration for record in records)
+    edit_count = len(records)
+    average_duration = total_duration / edit_count
+    last_edit = max(record.end_time for record in records)
+
+    return {
+        'total_duration': total_duration,
+        'average_duration': round(average_duration, 2),
+        'edit_count': edit_count,
+        'last_edit': last_edit.isoformat()
+    }

@@ -15,6 +15,7 @@ from flask import jsonify, request
 import os
 from models import db, Project, ProjectFile, ProjectStage, User, StageTask, FileContent
 from auth import get_employee_id
+from utils.activity_tracking import track_activity
 
 # 搜索
 
@@ -173,6 +174,7 @@ def check_stage_progress(stage_id):
 
 # 获取文件列表
 @files_bp.route('/stage/<int:stage_id>/task/<int:task_id>', methods=['GET'])
+@track_activity
 def get_stage_task_files(stage_id, task_id):
     try:
         files = ProjectFile.query.filter_by(
@@ -215,6 +217,7 @@ def get_stage_task_files(stage_id, task_id):
 # 2024年11月28日10:08:45
 # 上传文件，带索引
 @files_bp.route('/<int:project_id>/stages/<int:stage_id>/tasks/<int:task_id>/upload', methods=['POST'])
+@track_activity
 def upload_task_file(project_id, stage_id, task_id):
     file = request.files.get('file')
     if not file:
@@ -295,6 +298,7 @@ def upload_task_file(project_id, stage_id, task_id):
 
 # 搜索
 @files_bp.route('/search', methods=['GET'])
+@track_activity
 def search_files():
     try:
         search_query = request.args.get('query', '').strip()
@@ -458,6 +462,7 @@ def highlight_text(text, query):
 
 #  文件删除接口
 @files_bp.route('/<int:file_id>', methods=['DELETE'])
+@track_activity
 def delete_file(file_id):
     try:
         # 获取当前用户ID
@@ -513,6 +518,7 @@ def delete_file(file_id):
 
 # 文件下载
 @files_bp.route('/download/<int:file_id>', methods=['GET'])
+@track_activity
 def download_file(file_id):
     try:
         file = ProjectFile.query.get_or_404(file_id)

@@ -12,6 +12,7 @@ from models import db, Project, ProjectFile, ProjectUpdate, ProjectStage, User, 
     StageTask, TaskProgressUpdate, EditTimeTracking
 from auth import get_employee_id
 from routes.filemanagement import allowed_file, MAX_FILE_SIZE, generate_unique_filename, create_upload_path
+from utils.activity_tracking import track_activity
 
 employee_bp = Blueprint('employee', __name__)
 CORS(employee_bp)  # 为此蓝图启用 CORS
@@ -26,6 +27,7 @@ def get_employee_id():
 
 # 工程查看和编辑路线
 @employee_bp.route('/projects', methods=['GET'])
+@track_activity
 def get_assigned_projects():
     employee_id = get_employee_id()
     projects = Project.query.filter_by(employee_id=employee_id).all()
@@ -66,6 +68,7 @@ def get_assigned_projects():
 
 # 2024年11月1日09:05:36
 @employee_bp.route('/projects/<int:project_id>', methods=['PUT'])
+@track_activity
 def update_project(project_id):
     project = Project.query.get_or_404(project_id)
     data = request.get_json()
@@ -88,6 +91,7 @@ def update_project(project_id):
 
 # 进度跟踪
 @employee_bp.route('/projects/<int:project_id>/progress', methods=['PUT'])
+@track_activity
 def update_progress(project_id):
     project = Project.query.get_or_404(project_id)
     data = request.get_json()
@@ -100,6 +104,7 @@ def update_progress(project_id):
 
 # 获取项目进度以供显示
 @employee_bp.route('/projects/<int:project_id>/timeline', methods=['GET'])
+@track_activity
 def get_project_timeline(project_id):
     project = Project.query.get_or_404(project_id)
     return jsonify({
@@ -111,6 +116,7 @@ def get_project_timeline(project_id):
 
 # 截止日期提醒
 @employee_bp.route('/projects/reminders', methods=['GET'])
+@track_activity
 def get_reminders():
     employee_id = request.args.get('employee_id', type=int)
     projects = Project.query.filter_by(employee_id=employee_id).all()
@@ -133,6 +139,7 @@ def get_reminders():
 
 # 获取项目更新
 @employee_bp.route('/projects/<int:project_id>/updates', methods=['GET'])
+@track_activity
 def get_project_updates(project_id):
     try:
         project = Project.query.get_or_404(project_id)
@@ -154,6 +161,7 @@ def get_project_updates(project_id):
 
 # 更新项目进度
 @employee_bp.route('/projects/<int:project_id>/progress', methods=['POST'])
+@track_activity
 def update_project_progress(project_id):
     project = Project.query.get_or_404(project_id)
     data = request.get_json()
@@ -222,6 +230,7 @@ def token_required(f):
 
 # 获取用户个人信息接口
 @employee_bp.route('/profile', methods=['GET'])
+@track_activity
 @token_required
 def get_profile(current_user):
     return jsonify({
@@ -234,6 +243,7 @@ def get_profile(current_user):
 
 # 后端接口 - 添加检查当月是否已填报的接口
 @employee_bp.route('/check-monthly-report', methods=['GET'])
+@track_activity
 @token_required
 def check_monthly_report(current_user):
     has_reported = ReportClockin.has_reported_this_month(current_user.id)
@@ -244,66 +254,8 @@ def check_monthly_report(current_user):
 
 
 # 修改提交接口，添加验证
-# @employee_bp.route('/fill-card', methods=['POST'])
-# @token_required
-# def report_clock_in(current_user):
-#     # 先检查是否已经提交过
-#     if ReportClockin.has_reported_this_month(current_user.id):
-#         return jsonify({
-#             'error': '本月已提交过补卡申请，不能重复提交',
-#         }), 400
-#
-#     data = request.get_json()
-#     dates = data.get('dates', [])
-#
-#     if len(dates) > 3:
-#         return jsonify({'error': '最多只能选择3天'}), 400
-#
-#     try:
-#         # 创建补卡记录
-#         report = ReportClockin(
-#             employee_id=current_user.id,
-#             report_date=datetime.now()
-#         )
-#         db.session.add(report)
-#         db.session.flush()
-#
-#         # 添加补卡明细
-#         reported_dates = []
-#         for date_str in dates:
-#             try:
-#                 date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-#                 weekday = date_obj.strftime('%A')
-#
-#                 detail = ReportClockinDetail(
-#                     report_id=report.id,
-#                     clockin_date=date_obj.date(),
-#                     weekday=weekday
-#                 )
-#                 db.session.add(detail)
-#
-#                 reported_dates.append({
-#                     'date': date_str,
-#                     'weekday': weekday
-#                 })
-#             except ValueError:
-#                 db.session.rollback()
-#                 return jsonify({'error': f'无效的日期格式: {date_str}'}), 400
-#
-#         db.session.commit()
-#         return jsonify({
-#             'message': '补卡提交成功',
-#             'report_id': report.id,
-#             'employee_id': current_user.id,
-#             'employee_name': current_user.name if hasattr(current_user, 'name') else current_user.username,
-#             'reported_dates': reported_dates
-#         }), 200
-#
-#     except Exception as e:
-#         db.session.rollback()
-#         return jsonify({'error': str(e)}), 500
-
 @employee_bp.route('/fill-card', methods=['POST'])
+@track_activity
 @token_required
 def report_clock_in(current_user):
     # 先检查是否已经提交过
@@ -371,39 +323,9 @@ def report_clock_in(current_user):
 
 
 # 获取补卡记录
-# @employee_bp.route('/report-data', methods=['GET'])
-# @token_required
-# def get_report_data(current_user):
-#     # 获取当前月份的开始和结束时间
-#     today = datetime.now()
-#     start_of_month = datetime(today.year, today.month, 1)
-#     end_of_month = datetime(today.year, today.month + 1, 1) if today.month < 12 else datetime(today.year + 1, 1, 1)
-#
-#     # 查询本月的补卡记录
-#     report = ReportClockin.query.filter(
-#         ReportClockin.employee_id == current_user.id,
-#         ReportClockin.report_date >= start_of_month,
-#         ReportClockin.report_date < end_of_month
-#     ).first()
-#
-#     if not report:
-#         return jsonify({'error': '未找到补卡记录'}), 404
-#
-#     # 获取补卡明细
-#     reported_dates = [{
-#         'date': detail.clockin_date.strftime('%Y-%m-%d'),
-#         'weekday': detail.weekday
-#     } for detail in report.details]
-#
-#     return jsonify({
-#         'report_date': report.report_date,
-#         'employee_name': current_user.name if hasattr(current_user, 'name') else current_user.username,
-#         'employee_id': current_user.id,
-#         'reported_dates': reported_dates
-#     })
-
 
 @employee_bp.route('/report-data', methods=['GET'])
+@track_activity
 @token_required
 def get_report_data(current_user):
     # 获取当前月份的开始和结束时间
@@ -439,6 +361,7 @@ def get_report_data(current_user):
 
 # 创建任务进度更新
 @employee_bp.route('/tasks/<int:task_id>/progress-updates', methods=['POST'])
+@track_activity
 def add_task_progress_update(task_id):
     task = StageTask.query.get_or_404(task_id)
     data = request.get_json()
@@ -469,6 +392,7 @@ def add_task_progress_update(task_id):
 
 # 获取任务的进度更新记录
 @employee_bp.route('/tasks/<int:task_id>/progress-updates', methods=['GET'])
+@track_activity
 def get_task_progress_updates(task_id):
     task = StageTask.query.get_or_404(task_id)
     updates = TaskProgressUpdate.query.filter_by(task_id=task_id).order_by(TaskProgressUpdate.created_at.desc()).all()
@@ -486,6 +410,7 @@ def get_task_progress_updates(task_id):
 # 2024年12月13日10:05:12
 # 检测任务编辑时间
 @employee_bp.route('/tasks/<int:task_id>/edit-time', methods=['GET'])
+@track_activity
 @token_required  # 确保使用身份验证装饰器
 def get_task_edit_time(current_user, task_id):
     try:
@@ -523,6 +448,7 @@ def get_task_edit_time(current_user, task_id):
 
 # 获取阶段编辑时间
 @employee_bp.route('/stages/<int:stage_id>/edit-time', methods=['GET'])
+@track_activity
 @token_required
 def get_stage_edit_time(current_user, stage_id):
     try:
@@ -555,6 +481,7 @@ def get_stage_edit_time(current_user, stage_id):
 
 # 获取项目总编辑时间
 @employee_bp.route('/projects/<int:project_id>/total-edit-time', methods=['GET'])
+@track_activity
 @token_required
 def get_project_total_edit_time(current_user, project_id):
     try:

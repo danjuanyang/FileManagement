@@ -46,14 +46,6 @@ if False:
 
 from models import db, ProjectFile, FileContent
 
-
-# def detect_file_encoding(file_path):
-#     """检测文件编码"""
-#     with open(file_path, 'rb') as file:
-#         raw_data = file.read()
-#         result = chardet.detect(raw_data)
-#         return result['encoding']
-
 def detect_file_encoding(file_path):
     """检测文件编码"""
     if chardet is None:
@@ -65,18 +57,6 @@ def detect_file_encoding(file_path):
         result = chardet.detect(raw_data)
         return result['encoding']
 
-
-# def extract_text_from_docx(file_path):
-#     """提取Word文档内容"""
-#     try:
-#         doc = Document(file_path)
-#         full_text = []
-#         for paragraph in doc.paragraphs:
-#             full_text.append(paragraph.text)
-#         return '\n'.join(full_text)
-#     except Exception as e:
-#         print(f"Extract docx error: {str(e)}")
-#         return None
 
 def extract_text_from_docx(file_path):
     """提取Word文档内容"""
@@ -94,22 +74,6 @@ def extract_text_from_docx(file_path):
         print(f"Extract docx error: {str(e)}")
         return None
 
-
-
-
-# def extract_text_from_pdf(file_path):
-#     """提取PDF文档内容"""
-#     try:
-#         # 使用 PyMuPDF 替换 PyPDF2
-#         doc = fitz.open(file_path)
-#         text = []
-#         for page in doc:
-#             text.append(page.get_text())
-#         doc.close()  # 记得关闭文档
-#         return '\n'.join(text)
-#     except Exception as e:
-#         print(f"Extract PDF error: {str(e)}")
-#         return None
 
 # 2024年12月4日16:47:44
 # 修改 extract_text_from_pdf 函数来处理 fitz 导入失败的情况

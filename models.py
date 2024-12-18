@@ -249,3 +249,102 @@ class FileContent(db.Model):
                 connection.execute(stmt, {'id': self.id})
             except Exception:
                 pass
+
+
+# --------------------------------------------
+
+
+
+# 用户会话表
+
+class UserSession(db.Model):
+    __tablename__ = 'user_sessions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    login_time = db.Column(db.DateTime, nullable=False)
+    logout_time = db.Column(db.DateTime)
+    is_active = db.Column(db.Boolean, default=True)
+    last_activity_time = db.Column(db.DateTime, nullable=False)
+    session_duration = db.Column(db.Integer)
+    user_agent = db.Column(db.String(255))
+    ip_address = db.Column(db.String(50))
+
+    user = db.relationship('User', backref=db.backref('sessions', lazy='dynamic'))
+
+    def __init__(self, user_id, ip_address=None, user_agent=None):
+        self.user_id = user_id
+        self.login_time = datetime.now()
+        self.last_activity_time = datetime.now()
+        self.is_active = True
+        self.ip_address = ip_address
+        self.user_agent = user_agent
+
+    def end_session(self):
+        """结束会话"""
+        current_time = datetime.now()
+        self.is_active = False
+        self.logout_time = current_time
+        if self.login_time:
+            self.session_duration = int((current_time - self.login_time).total_seconds())
+
+
+
+
+# 用户活动日志表
+class UserActivityLog(db.Model):
+    __tablename__ = 'user_activity_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    action_type = db.Column(db.String(50), nullable=False)  # 登录、注销、建项目等
+    action_detail = db.Column(db.Text)
+    ip_address = db.Column(db.String(50))
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    resource_type = db.Column(db.String(50))  # project, task, file等
+    resource_id = db.Column(db.Integer) # 资源ID
+    status_code = db.Column(db.Integer)  # HTTP状态码
+    request_method = db.Column(db.String(10))  # GET, POST等
+    endpoint = db.Column(db.String(255))  # API端点
+    # 新增字段
+    resource_type = db.Column(db.String(50))  # 例如：'project', 'task', 'file'
+    resource_id = db.Column(db.Integer)
+    status_code = db.Column(db.Integer)  # HTTP 状态码
+    request_method = db.Column(db.String(10))  # GET, POST, PUT, DELETE 等
+    endpoint = db.Column(db.String(100))  # Flask 端点名称
+    request_path = db.Column(db.String(255))  # 请求路径
+
+
+    # 建立与User模型的关系
+    user = db.relationship('User', backref=db.backref('activity_logs', lazy='dynamic'))
+
+    def __init__(self, user_id, action_type, action_detail=None, ip_address=None,
+                 resource_type=None, resource_id=None, status_code=None,
+                 request_method=None, endpoint=None, request_path=None):
+        self.user_id = user_id
+        self.action_type = action_type
+        self.action_detail = action_detail
+        self.ip_address = ip_address
+        self.timestamp = datetime.now()
+        self.resource_type = resource_type
+        self.resource_id = resource_id
+        self.status_code = status_code
+        self.request_method = request_method
+        self.endpoint = endpoint
+        self.request_path = request_path
+
+    @property
+    def formatted_timestamp(self):
+        return datetime.strptime(self.timestamp, '%Y-%m-%d %H:%M:%S')
+
+    # 快速创建活动日志的类方法
+    @classmethod
+    def log_activity(cls, user_id, action_type, **kwargs):
+
+        log = cls(user_id=user_id, action_type=action_type, **kwargs)
+        db.session.add(log)
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"错误记录活动： {str(e)}")

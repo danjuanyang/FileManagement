@@ -4,6 +4,7 @@ from flask import Blueprint, request, jsonify
 from flask_cors import CORS
 from models import db, ProjectStage, StageTask, EditTimeTracking
 from auth import get_employee_id
+from utils.activity_tracking import track_activity
 
 projectplan_bp = Blueprint('projectplan', __name__)
 CORS(projectplan_bp)  # 为此蓝图启用 CORS
@@ -12,6 +13,7 @@ CORS(projectplan_bp, resources={r"/api/*": {"origins": "*"}})  # 根据需要调
 
 # 获取包含任务的项目阶段
 @projectplan_bp.route('/stages/<int:project_id>', methods=['GET'])
+@track_activity
 def get_project_stages(project_id):
     stages = ProjectStage.query.filter_by(project_id=project_id).all()
     return jsonify([{
@@ -42,6 +44,7 @@ def get_project_stages(project_id):
 
 # 创建项目阶段
 @projectplan_bp.route('/stages', methods=['POST'])
+@track_activity
 def create_project_stage():
     data = request.get_json()
     tracking_id = data.pop('trackingId', None)
@@ -71,6 +74,7 @@ def create_project_stage():
 
 # 更新项目阶段
 @projectplan_bp.route('/stages/<int:id>', methods=['PUT'])
+@track_activity
 def update_project_stage(id):
     stage = ProjectStage.query.get_or_404(id)
     data = request.get_json()
@@ -88,6 +92,7 @@ def update_project_stage(id):
 
 # 删除项目阶段
 @projectplan_bp.route('/stages/<int:id>', methods=['DELETE'])
+@track_activity
 def delete_project_stage(id):
     stage = ProjectStage.query.get_or_404(id)
     db.session.delete(stage)
@@ -98,6 +103,7 @@ def delete_project_stage(id):
 # -------------------
 # 为阶段创建任务
 @projectplan_bp.route('/stages/<int:stage_id>/tasks', methods=['POST'])
+@track_activity
 def create_stage_task(stage_id):
     data = request.get_json()
     tracking_id = data.pop('trackingId', None)
@@ -127,6 +133,7 @@ def create_stage_task(stage_id):
 
 # 更新任务
 @projectplan_bp.route('/tasks/<int:task_id>', methods=['PUT'])
+@track_activity
 def update_task(task_id):
     task = StageTask.query.get_or_404(task_id)
     data = request.get_json()
@@ -158,6 +165,7 @@ def update_task(task_id):
 
 # 删除任务
 @projectplan_bp.route('/tasks/<int:task_id>', methods=['DELETE'])
+@track_activity
 def delete_task(task_id):
     task = StageTask.query.get_or_404(task_id)
     stage_id = task.stage_id
@@ -192,6 +200,7 @@ def update_stage_progress(stage_id):
 
 # 导出项目计划，包含所有阶段和任务
 @projectplan_bp.route('/projects/<int:project_id>/export', methods=['GET'])
+@track_activity
 def export_project_plan(project_id):
     stages = ProjectStage.query.filter_by(project_id=project_id).all()
     return jsonify([{
@@ -215,6 +224,7 @@ def export_project_plan(project_id):
 
 # 追踪编辑时间
 @projectplan_bp.route('/tracking/start', methods=['POST'])
+@track_activity
 def start_edit_tracking():
     data = request.get_json()
     user_id = get_employee_id()
@@ -237,6 +247,7 @@ def start_edit_tracking():
 
 
 @projectplan_bp.route('/tracking/end/<int:tracking_id>', methods=['PUT'])
+@track_activity
 def end_edit_tracking(tracking_id):
     tracking = EditTimeTracking.query.get_or_404(tracking_id)
     tracking.end_time = datetime.now()

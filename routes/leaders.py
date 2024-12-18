@@ -6,12 +6,14 @@ from models import db, Project, ProjectFile, User, StageTask, ProjectStage, Edit
 from datetime import datetime
 
 from routes.employees import token_required
+from utils.activity_tracking import track_activity
 
 leader_bp = Blueprint('leader', __name__)
 CORS(leader_bp)
 
 
 @leader_bp.route('/projects', methods=['GET'])
+@track_activity
 def get_projects():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
@@ -45,6 +47,7 @@ def get_projects():
 
 # 创建项目
 @leader_bp.route('/projects', methods=['POST'])
+@token_required
 def create_project():
     data = request.get_json()
 
@@ -74,6 +77,7 @@ def create_project():
 
 # 更新项目
 @leader_bp.route('/projects/<int:project_id>', methods=['PUT'])
+@token_required
 def update_project(project_id):
     project = Project.query.get_or_404(project_id)
     data = request.get_json()
@@ -123,6 +127,7 @@ def update_project(project_id):
 
 # 查看项目文件
 @leader_bp.route('/projects/<int:project_id>/files', methods=['GET'])
+@track_activity
 def get_project_files(project_id):
     files = ProjectFile.query.filter_by(project_id=project_id).all()
     return jsonify({
@@ -140,6 +145,7 @@ def get_project_files(project_id):
 
 # 搜索文件
 @leader_bp.route('/files/search', methods=['GET'])
+@track_activity
 def search_files():
     keyword = request.args.get('keyword', '')
     files = ProjectFile.query.filter(ProjectFile.file_name.ilike(f'%{keyword}%')).all()
@@ -157,6 +163,7 @@ def search_files():
 
 # 获取所有员工列表
 @leader_bp.route('/employees', methods=['GET'])
+@track_activity
 def get_employees():
     employees = User.query.filter_by(role=2).all()
     return jsonify({
@@ -170,6 +177,7 @@ def get_employees():
 # 查看单个项目所有信息，此处请求为project没有s
 # 查看单个项目所有信息
 @leader_bp.route('/project/<int:project_id>', methods=['GET'])
+@track_activity
 def get_project_details(project_id):
     try:
         # 检索项目
@@ -234,6 +242,7 @@ def get_project_details(project_id):
 
 
 @leader_bp.route('/report-clockin-data', methods=['GET'])
+@track_activity
 @token_required
 def get_report_clockin_data(current_user):
     if  current_user.role != 1:
@@ -301,6 +310,7 @@ def get_report_clockin_data(current_user):
 
 # 项目列表
 @leader_bp.route('/projectlist', methods=['GET'])
+@track_activity
 @token_required
 def get_project_list(current_user):
     if current_user.role != 1:

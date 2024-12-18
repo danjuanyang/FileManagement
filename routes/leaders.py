@@ -1,8 +1,10 @@
 # routes/leaders.py
 from flask import Blueprint, request, jsonify
 from flask_cors import CORS
+from sqlalchemy import desc
+
 from models import db, Project, ProjectFile, User, StageTask, ProjectStage, EditTimeTracking, ReportClockinDetail, \
-    ReportClockin
+    ReportClockin, UserSession
 from datetime import datetime
 
 from routes.employees import token_required
@@ -378,5 +380,180 @@ def get_project_list(current_user):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# 用户管理
+@leader_bp.route('/users', methods=['GET'])
+@token_required
+def get_users(current_user):
+    if current_user.role != 1:
+        return jsonify({'error': '权限不足'}), 403
+
+    try:
+        page = request.args.get('page', 1, type=int)
+        page_size = request.args.get('pageSize', 10, type=int)
+        search = request.args.get('search', '')
+        role = request.args.get('role', type=int)
+
+        # 构建基础查询
+        query = User.query
+
+        # 添加搜索条件
+        if search:
+            query = query.filter(User.username.ilike(f'%{search}%'))
+
+        # 添加角色过滤
+        if role:
+            query = query.filter(User.role == role)
+
+        # 计算总数
+        total = query.count()
+
+        # 分页
+        users = query.paginate(page=page, per_page=page_size)
+
+        # 准备用户数据
+        user_list = []
+        for user in users.items:
+            # 获取最后一次登录信息
+            last_session = UserSession.query.filter_by(user_id=user.id).order_by(desc(UserSession.login_time)).first()
+
+            # 获取用户的项目
+            projects = Project.query.filter_by(employee_id=user.id).all()
+            project_list = [{
+                'id': project.id,
+                'name': project.name,
+                'progress': project.progress,
+                'status': project.status,
+                'deadline': project.deadline.isoformat() if project.deadline else None
+            } for project in projects]
+
+            user_data = {
+                'id': user.id,
+                'username': user.username,
+                'role': user.role,
+                'lastLogin': {
+                    'login_time': last_session.login_time.isoformat() if last_session else None,
+                    'is_active': last_session.is_active if last_session else False,
+                    'ip_address': last_session.ip_address if last_session else None,
+                    'user_agent': last_session.user_agent if last_session else None
+                } if last_session else None,
+                'projects': project_list,
+                'sessions': [{
+                    'login_time': session.login_time.isoformat(),
+                    'ip_address': session.ip_address,
+                    'user_agent': session.user_agent
+                } for session in
+                    UserSession.query.filter_by(user_id=user.id).order_by(desc(UserSession.login_time)).limit(5)]
+            }
+            user_list.append(user_data)
+
+        return jsonify({
+            'items': user_list,
+            'total': total,
+            'page': page,
+            'pageSize': page_size
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
+# 新建用户
+@leader_bp.route('/users', methods=['POST'])
+@token_required
+def create_user(current_user):
+    if current_user.role != 1:
+        return jsonify({'error': '权限不足'}), 403
+
+    try:
+        data = request.get_json()
+
+        # 验证必要字段
+        if not all(k in data for k in ('username', 'password', 'role')):
+            return jsonify({'error': '缺少必要字段'}), 400
+
+        # 检查用户名是否已存在
+        if User.query.filter_by(username=data['username']).first():
+            return jsonify({'error': '用户名已存在'}), 400
+
+        # 创建新用户
+        new_user = User()
+        new_user.username = data['username']
+        new_user.set_password(data['password'])
+        new_user.role = data['role']
+
+        db.session.add(new_user)
+        db.session.commit()
+
+        return jsonify({
+            'message': '用户创建成功',
+            'user': {
+                'id': new_user.id,
+                'username': new_user.username,
+                'role': new_user.role
+            }
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+# 修改用户
+@leader_bp.route('/users/<int:user_id>', methods=['PUT'])
+@token_required
+def update_user(current_user, user_id):
+    if current_user.role != 1:
+        return jsonify({'error': '权限不足'}), 403
+
+    try:
+        user = User.query.get_or_404(user_id)
+        data = request.get_json()
+
+        # 更新用户信息
+        if 'username' in data and data['username'] != user.username:
+            if User.query.filter_by(username=data['username']).first():
+                return jsonify({'error': '用户名已存在'}), 400
+            user.username = data['username']
+
+        if 'password' in data and data['password']:
+            user.set_password(data['password'])
+
+        if 'role' in data:
+            user.role = data['role']
+
+        db.session.commit()
+
+        return jsonify({
+            'message': '用户更新成功',
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'role': user.role
+            }
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+# 删除用户
+@leader_bp.route('/users/<int:user_id>', methods=['DELETE'])
+@token_required
+def delete_user(current_user, user_id):
+    if current_user.role != 1:
+        return jsonify({'error': '权限不足'}), 403
+
+    try:
+        user = User.query.get_or_404(user_id)
+
+        # 检查是否删除自己
+        if user.id == current_user.id:
+            return jsonify({'error': '不能删除当前登录用户'}), 400
+
+        db.session.delete(user)
+        db.session.commit()
+
+        return jsonify({'message': '用户删除成功'})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500

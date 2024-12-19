@@ -2,7 +2,7 @@
 from flask import Blueprint, request, jsonify
 from flask_cors import CORS
 from sqlalchemy import desc
-
+from user_agents import parse
 from models import db, Project, ProjectFile, User, StageTask, ProjectStage, EditTimeTracking, ReportClockinDetail, \
     ReportClockin, UserSession
 from datetime import datetime
@@ -247,7 +247,7 @@ def get_project_details(project_id):
 @track_activity
 @token_required
 def get_report_clockin_data(current_user):
-    if  current_user.role != 1:
+    if current_user.role != 1:
         return jsonify({'error': '权限不足'}), 403
 
     # 获取查询参数
@@ -307,7 +307,6 @@ def get_report_clockin_data(current_user):
         return jsonify({'error': '无效的日期格式'}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
 
 
 # 项目列表
@@ -380,7 +379,102 @@ def get_project_list(current_user):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 # 用户管理
+# @leader_bp.route('/users', methods=['GET'])
+# @token_required
+# def get_users(current_user):
+#     if current_user.role != 1:
+#         return jsonify({'error': '权限不足'}), 403
+#
+#     try:
+#         page = request.args.get('page', 1, type=int)
+#         page_size = request.args.get('pageSize', 10, type=int)
+#         search = request.args.get('search', '')
+#         role = request.args.get('role', type=int)
+#
+#         # 构建基础查询
+#         query = User.query
+#
+#         # 添加搜索条件
+#         if search:
+#             query = query.filter(User.username.ilike(f'%{search}%'))
+#
+#         # 添加角色过滤
+#         if role:
+#             query = query.filter(User.role == role)
+#
+#         # 计算总数
+#         total = query.count()
+#
+#         # 分页
+#         users = query.paginate(page=page, per_page=page_size)
+#
+#         def parse_user_agent(user_agent_string):
+#             if not user_agent_string:
+#                 return "未知设备"
+#             try:
+#                 user_agent = parse(user_agent_string)
+#                 # 获取设备信息
+#                 if user_agent.is_mobile:
+#                     device = f"移动设备 ({user_agent.device.brand} {user_agent.device.model})"
+#                 elif user_agent.is_tablet:
+#                     device = f"平板设备 ({user_agent.device.brand} {user_agent.device.model})"
+#                 elif user_agent.is_pc:
+#                     device = f"电脑 ({user_agent.browser.family} on {user_agent.os.family})"
+#                 else:
+#                     device = f"{user_agent.browser.family} on {user_agent.os.family}"
+#                 return device
+#             except:
+#                 return "未知设备"
+#
+#         # 准备用户数据
+#         user_list = []
+#         for user in users.items:
+#             # 获取最后一次登录信息
+#             last_session = UserSession.query.filter_by(user_id=user.id).order_by(desc(UserSession.login_time)).first()
+#
+#             # 获取用户的项目
+#             projects = Project.query.filter_by(employee_id=user.id).all()
+#             project_list = [{
+#                 'id': project.id,
+#                 'name': project.name,
+#                 'progress': project.progress,
+#                 'status': project.status,
+#                 'deadline': project.deadline.isoformat() if project.deadline else None
+#             } for project in projects]
+#
+#             user_data = {
+#                 'id': user.id,
+#                 'username': user.username,
+#                 'role': user.role,
+#                 'lastLogin': {
+#                     'login_time': last_session.login_time.isoformat() if last_session else None,
+#                     'is_active': last_session.is_active if last_session else False,
+#                     'ip_address': last_session.ip_address if last_session else None,
+#                     'device_info': parse_user_agent(last_session.user_agent) if last_session else "未知设备"
+#                 } if last_session else None,
+#                 'projects': project_list,
+#                 'sessions': [{
+#                     'login_time': session.login_time.isoformat(),
+#                     'ip_address': session.ip_address,
+#                     'user_agent': session.user_agent
+#                 } for session in
+#                     UserSession.query.filter_by(user_id=user.id).order_by(desc(UserSession.login_time)).limit(5)]
+#             }
+#             user_list.append(user_data)
+#
+#         return jsonify({
+#             'items': user_list,
+#             'total': total,
+#             'page': page,
+#             'pageSize': page_size
+#         })
+#
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
+
+
 @leader_bp.route('/users', methods=['GET'])
 @token_required
 def get_users(current_user):
@@ -393,30 +487,39 @@ def get_users(current_user):
         search = request.args.get('search', '')
         role = request.args.get('role', type=int)
 
-        # 构建基础查询
         query = User.query
 
-        # 添加搜索条件
         if search:
             query = query.filter(User.username.ilike(f'%{search}%'))
 
-        # 添加角色过滤
         if role:
             query = query.filter(User.role == role)
 
-        # 计算总数
         total = query.count()
-
-        # 分页
         users = query.paginate(page=page, per_page=page_size)
 
-        # 准备用户数据
+        def parse_user_agent(user_agent_string):
+            if not user_agent_string:
+                return "未知设备"
+            try:
+                user_agent = parse(user_agent_string)
+                # 获取设备信息
+                if user_agent.is_mobile:
+                    device = f"移动设备 ({user_agent.device.brand} {user_agent.device.model})"
+                elif user_agent.is_tablet:
+                    device = f"平板设备 ({user_agent.device.brand} {user_agent.device.model})"
+                elif user_agent.is_pc:
+                    device = f"电脑 ({user_agent.browser.family} on {user_agent.os.family})"
+                else:
+                    device = f"{user_agent.browser.family} on {user_agent.os.family}"
+                return device
+            except:
+                return "未知设备"
+
         user_list = []
         for user in users.items:
-            # 获取最后一次登录信息
             last_session = UserSession.query.filter_by(user_id=user.id).order_by(desc(UserSession.login_time)).first()
 
-            # 获取用户的项目
             projects = Project.query.filter_by(employee_id=user.id).all()
             project_list = [{
                 'id': project.id,
@@ -434,13 +537,13 @@ def get_users(current_user):
                     'login_time': last_session.login_time.isoformat() if last_session else None,
                     'is_active': last_session.is_active if last_session else False,
                     'ip_address': last_session.ip_address if last_session else None,
-                    'user_agent': last_session.user_agent if last_session else None
+                    'device_info': parse_user_agent(last_session.user_agent) if last_session else "未知设备"
                 } if last_session else None,
                 'projects': project_list,
                 'sessions': [{
                     'login_time': session.login_time.isoformat(),
                     'ip_address': session.ip_address,
-                    'user_agent': session.user_agent
+                    'device_info': parse_user_agent(session.user_agent)
                 } for session in
                     UserSession.query.filter_by(user_id=user.id).order_by(desc(UserSession.login_time)).limit(5)]
             }
@@ -454,6 +557,7 @@ def get_users(current_user):
         })
 
     except Exception as e:
+        print(f"Error fetching users: {str(e)}")  # 添加日志
         return jsonify({'error': str(e)}), 500
 
 
@@ -497,6 +601,7 @@ def create_user(current_user):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+
 # 修改用户
 @leader_bp.route('/users/<int:user_id>', methods=['PUT'])
 @token_required
@@ -535,7 +640,30 @@ def update_user(current_user, user_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+
 # 删除用户
+# @leader_bp.route('/users/<int:user_id>', methods=['DELETE'])
+# @token_required
+# def delete_user(current_user, user_id):
+#     if current_user.role != 1:
+#         return jsonify({'error': '权限不足'}), 403
+#
+#     try:
+#         user = User.query.get_or_404(user_id)
+#
+#         # 检查是否删除自己
+#         if user.id == current_user.id:
+#             return jsonify({'error': '不能删除当前登录用户'}), 400
+#
+#         db.session.delete(user)
+#         db.session.commit()
+#
+#         return jsonify({'message': '用户删除成功'})
+#
+#     except Exception as e:
+#         db.session.rollback()
+#         return jsonify({'error': str(e)}), 500
+
 @leader_bp.route('/users/<int:user_id>', methods=['DELETE'])
 @token_required
 def delete_user(current_user, user_id):
@@ -549,11 +677,31 @@ def delete_user(current_user, user_id):
         if user.id == current_user.id:
             return jsonify({'error': '不能删除当前登录用户'}), 400
 
-        db.session.delete(user)
-        db.session.commit()
+        # 开始事务
+        with db.session.begin_nested():
+            # 先处理可能的关联数据
+            # 获取用户关联的项目
+            projects = Project.query.filter_by(employee_id=user.id).all()
+            if projects:
+                for project in projects:
+                    # 检查项目状态
+                    if project.status == 'ongoing':
+                        return jsonify({'error': f'用户有正在进行中的项目: {project.name}, 无法删除'}), 400
+                    project.employee_id = None
 
+            # 将上传文件的用户ID置为空
+            ProjectFile.query.filter_by(upload_user_id=user.id).update({'upload_user_id': None})
+
+            # 删除用户相关的编辑时间记录和补卡记录会通过 CASCADE 自动处理
+
+            # 删除用户
+            db.session.delete(user)
+
+        # 提交事务
+        db.session.commit()
         return jsonify({'message': '用户删除成功'})
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        print(f"删除用户错误: {str(e)}")  # 添加日志输出
+        return jsonify({'error': f'删除用户失败: {str(e)}'}), 500

@@ -31,14 +31,16 @@ class Project(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text)
-    employee_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    # employee_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    employee_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     start_date = db.Column(db.DateTime, default=datetime.now)
     deadline = db.Column(db.DateTime, nullable=False)
     progress = db.Column(db.Float, default=0.0)  # 0-100
     status = db.Column(db.String(20), default='pending')  # 待处理、正在干、已完成
 
     # 关联
-    employee = db.relationship('User', backref='projects')
+    # employee = db.relationship('User', backref='projects')
+    employee = db.relationship('User', backref=db.backref('projects', passive_deletes=True))
     files = db.relationship('ProjectFile', back_populates='project', lazy=True)
     stages = db.relationship('ProjectStage', back_populates='project', lazy=True)
     updates = db.relationship('ProjectUpdate', back_populates='project')
@@ -90,12 +92,14 @@ class ProjectFile(db.Model):
     file_name = db.Column(db.String(255), nullable=False)
     file_type = db.Column(db.String(100))
     file_path = db.Column(db.String(255), nullable=False)
-    upload_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    # upload_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    upload_user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     upload_date = db.Column(db.DateTime, nullable=False, default=datetime.now)
     text_extracted = db.Column(db.Boolean, default=False)
 
     # 关联
-    upload_user = db.relationship('User', backref='uploaded_files')
+    # upload_user = db.relationship('User', backref='uploaded_files')
+    upload_user = db.relationship('User', backref=db.backref('uploaded_files', passive_deletes=True))
     project = db.relationship('Project', back_populates='files')
     stage = db.relationship('ProjectStage', back_populates='stage_files')
     task = db.relationship('StageTask', backref='files')
@@ -128,7 +132,8 @@ class EditTimeTracking(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    # user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     edit_type = db.Column(db.String(20), nullable=False)  # 'stage' or 'task'
     start_time = db.Column(db.DateTime, nullable=False)
     end_time = db.Column(db.DateTime, nullable=False)
@@ -138,7 +143,8 @@ class EditTimeTracking(db.Model):
 
     # 关系
     project = db.relationship('Project', backref='edit_tracks')
-    user = db.relationship('User', backref='edit_tracks')
+    # user = db.relationship('User', backref='edit_tracks')
+    user = db.relationship('User', backref=db.backref('edit_tracks', passive_deletes=True))
     stage = db.relationship('ProjectStage', backref='edit_tracks')
     task = db.relationship('StageTask', backref='edit_tracks')
 
@@ -148,12 +154,14 @@ class ReportClockin(db.Model):
     __tablename__ = 'report_clockins'
 
     id = db.Column(db.Integer, primary_key=True)
-    employee_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    # employee_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     report_date = db.Column(db.DateTime, nullable=False, default=datetime.now())
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.now())
 
     # 关联
-    employee = db.relationship('User', backref='report_clockins')
+    # employee = db.relationship('User', backref='report_clockins')
+    employee = db.relationship('User', backref=db.backref('report_clockins', passive_deletes=True))
     details = db.relationship('ReportClockinDetail', backref='report', cascade='all, delete-orphan')
 
     @classmethod
@@ -254,7 +262,6 @@ class FileContent(db.Model):
 # --------------------------------------------
 
 
-
 # 用户会话表
 
 class UserSession(db.Model):
@@ -270,7 +277,11 @@ class UserSession(db.Model):
     user_agent = db.Column(db.String(255))
     ip_address = db.Column(db.String(50))
 
-    user = db.relationship('User', backref=db.backref('sessions', lazy='dynamic'))
+    # user = db.relationship('User', backref=db.backref('sessions', lazy='dynamic'))
+    user = db.relationship('User',
+                           backref=db.backref('sessions',
+                                              lazy='dynamic',
+                                              passive_deletes=True))
 
     def __init__(self, user_id, ip_address=None, user_agent=None):
         self.user_id = user_id
@@ -289,8 +300,6 @@ class UserSession(db.Model):
             self.session_duration = int((current_time - self.login_time).total_seconds())
 
 
-
-
 # 用户活动日志表
 class UserActivityLog(db.Model):
     __tablename__ = 'user_activity_logs'
@@ -302,7 +311,7 @@ class UserActivityLog(db.Model):
     ip_address = db.Column(db.String(50))
     timestamp = db.Column(db.DateTime, nullable=False, default=datetime.now)
     resource_type = db.Column(db.String(50))  # project, task, file等
-    resource_id = db.Column(db.Integer) # 资源ID
+    resource_id = db.Column(db.Integer)  # 资源ID
     status_code = db.Column(db.Integer)  # HTTP状态码
     request_method = db.Column(db.String(10))  # GET, POST等
     endpoint = db.Column(db.String(255))  # API端点
@@ -314,9 +323,12 @@ class UserActivityLog(db.Model):
     endpoint = db.Column(db.String(100))  # Flask 端点名称
     request_path = db.Column(db.String(255))  # 请求路径
 
-
     # 建立与User模型的关系
-    user = db.relationship('User', backref=db.backref('activity_logs', lazy='dynamic'))
+    # user = db.relationship('User', backref=db.backref('activity_logs', lazy='dynamic'))
+    user = db.relationship('User',
+                           backref=db.backref('activity_logs',
+                                              lazy='dynamic',
+                                              passive_deletes=True))
 
     def __init__(self, user_id, action_type, action_detail=None, ip_address=None,
                  resource_type=None, resource_id=None, status_code=None,

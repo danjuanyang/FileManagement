@@ -236,3 +236,29 @@ def get_unread_count(current_user):
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# 重置公告阅读状态
+@announcement_bp.route('/announcements/<int:announcement_id>/reset-read-status', methods=['PUT'])
+@track_activity
+@token_required
+def reset_read_status(current_user, announcement_id):
+    try:
+        # 检索特定公告和用户的读取状态
+        read_status = AnnouncementReadStatus.query.filter_by(
+            user_id=current_user.id,
+            announcement_id=announcement_id
+        ).first()
+
+        if read_status:
+            read_status.is_read = False
+            read_status.read_at = None
+            db.session.commit()
+
+            return jsonify({'message': '公告阅读状态重置为未读成功'})
+
+        return jsonify({'error': '未找到阅读状态'}), 404
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500

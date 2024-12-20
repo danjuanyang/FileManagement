@@ -160,7 +160,6 @@ class ReportClockin(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.now())
 
     # 关联
-    # employee = db.relationship('User', backref='report_clockins')
     employee = db.relationship('User', backref=db.backref('report_clockins', passive_deletes=True))
     details = db.relationship('ReportClockinDetail', backref='report', cascade='all, delete-orphan')
 
@@ -277,11 +276,7 @@ class UserSession(db.Model):
     user_agent = db.Column(db.String(255))
     ip_address = db.Column(db.String(50))
 
-    # user = db.relationship('User', backref=db.backref('sessions', lazy='dynamic'))
-    user = db.relationship('User',
-                           backref=db.backref('sessions',
-                                              lazy='dynamic',
-                                              passive_deletes=True))
+    user = db.relationship('User', backref=db.backref('sessions', lazy='dynamic', passive_deletes=True))
 
     def __init__(self, user_id, ip_address=None, user_agent=None):
         self.user_id = user_id
@@ -324,7 +319,6 @@ class UserActivityLog(db.Model):
     request_path = db.Column(db.String(255))  # 请求路径
 
     # 建立与User模型的关系
-    # user = db.relationship('User', backref=db.backref('activity_logs', lazy='dynamic'))
     user = db.relationship('User',
                            backref=db.backref('activity_logs',
                                               lazy='dynamic',
@@ -360,3 +354,42 @@ class UserActivityLog(db.Model):
         except Exception as e:
             db.session.rollback()
             print(f"错误记录活动： {str(e)}")
+
+
+
+# ----------------公告板模型----------------
+class Announcement(db.Model):
+    __tablename__ = 'announcements'
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+    is_active = db.Column(db.Boolean, default=True)  # 用于软删除
+    priority = db.Column(db.Integer, default=0)  # 优先级：0=普通，1=重要，2=紧急
+
+    # 关系
+    creator = db.relationship('User', backref=db.backref('announcements', lazy='dynamic'))
+    read_status = db.relationship('AnnouncementReadStatus', back_populates='announcement', cascade='all, delete-orphan')
+
+
+# 公告阅读状态表
+class AnnouncementReadStatus(db.Model):
+    __tablename__ = 'announcement_read_status'
+
+    id = db.Column(db.Integer, primary_key=True)
+    announcement_id = db.Column(db.Integer, db.ForeignKey('announcements.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    is_read = db.Column(db.Boolean, default=False)
+    read_at = db.Column(db.DateTime, nullable=True)
+
+    # 关系
+    announcement = db.relationship('Announcement', back_populates='read_status')
+    user = db.relationship('User', backref=db.backref('announcement_reads', lazy='dynamic'))
+
+    # 联合唯一索引确保每个用户对每个公告只有一个阅读状态
+    __table_args__ = (
+        db.UniqueConstraint('announcement_id', 'user_id', name='_announcement_user_uc'),
+    )

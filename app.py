@@ -11,6 +11,7 @@ from flask import request, jsonify, redirect, url_for
 import jwt
 import datetime
 from models import User, Project, UserSession, UserActivityLog
+from routes.announcements import announcement_bp
 from routes.filemanagement import files_bp
 from routes.leaders import leader_bp
 from routes.employees import employee_bp
@@ -24,6 +25,7 @@ app.register_blueprint(projectplan_bp, url_prefix='/api/projectplan')
 
 app.register_blueprint(files_bp, url_prefix='/api/files')
 
+app.register_blueprint(announcement_bp, url_prefix='/api/announcements')
 
 # 用户登录接口
 # @app.route('/api/login', methods=['POST'])

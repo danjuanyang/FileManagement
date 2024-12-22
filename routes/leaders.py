@@ -3,6 +3,7 @@ from flask import Blueprint, request, jsonify
 from flask_cors import CORS
 from sqlalchemy import desc
 from user_agents import parse
+
 from models import db, Project, ProjectFile, User, StageTask, ProjectStage, EditTimeTracking, ReportClockinDetail, \
     ReportClockin, UserSession
 from datetime import datetime
@@ -49,8 +50,13 @@ def get_projects():
 
 # 创建项目
 @leader_bp.route('/projects', methods=['POST'])
+@track_activity
 @token_required
-def create_project():
+def create_project(current_user):
+    # 检查是否是管理员
+    if current_user.role != 1:
+        return jsonify({'error': '权限不足'}), 403
+
     data = request.get_json()
 
     # 验证员工是否存在
@@ -75,6 +81,7 @@ def create_project():
         'message': '项目创建成功',
         'project_id': project.id
     }), 201
+
 
 
 # 更新项目

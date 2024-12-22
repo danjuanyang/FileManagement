@@ -96,7 +96,8 @@ def get_announcements(current_user):
                 'created_by': ann.creator.username if ann.creator else None,
                 'created_at': ann.created_at.isoformat(),
                 'priority': ann.priority,
-                'is_read': read_status.get(ann.id, False)
+                'is_read': read_status.get(ann.id, False),
+                'is_active': ann.is_active
             } for ann in announcements.items],
             'total': announcements.total,
             'pages': announcements.pages,
@@ -154,17 +155,26 @@ def get_read_statistics(current_user, announcement_id):
 
     try:
         announcement = Announcement.query.get_or_404(announcement_id)
-        read_status = AnnouncementReadStatus.query.filter_by(announcement_id=announcement_id).all()
 
-        total_users = len(read_status)
-        read_users = sum(1 for status in read_status if status.is_read)
+        # 获取所有非管理员用户的阅读状态
+        read_status = (AnnouncementReadStatus.query
+                       .join(User)
+                       .filter(AnnouncementReadStatus.announcement_id == announcement_id)
+                       .all())
 
+        # 统计非管理员用户的数量和已读数量
         user_status = [{
             'user_id': status.user_id,
             'username': status.user.username,
             'is_read': status.is_read,
-            'read_at': status.read_at.isoformat() if status.read_at else None
+            'read_at': status.read_at.isoformat() if status.read_at else None,
+            'role': status.user.role  # 添加用户角色信息
         } for status in read_status]
+
+        # 计算总数（所有用户，包括管理员）
+        total_users = len(read_status)
+        # 计算已读数（所有用户，包括管理员）
+        read_users = sum(1 for status in read_status if status.is_read)
 
         return jsonify({
             'announcement_id': announcement_id,
@@ -191,16 +201,36 @@ def update_announcement(current_user, announcement_id):
         announcement = Announcement.query.get_or_404(announcement_id)
         data = request.get_json()
 
-        if 'title' in data:
-            announcement.title = data['title']
-        if 'content' in data:
-            announcement.content = data['content']
-        if 'priority' in data:
-            announcement.priority = data['priority']
-        if 'is_active' in data:
-            announcement.is_active = data['is_active']
+        # 记录是否有内容变更
+        content_changed = False
 
+        # 更新字段
+        if 'title' in data and data['title'] != announcement.title:
+            announcement.title = data['title']
+            content_changed = True
+
+        if 'content' in data and data['content'] != announcement.content:
+            announcement.content = data['content']
+            content_changed = True
+
+        if 'priority' in data and data['priority'] != announcement.priority:
+            announcement.priority = data['priority']
+            content_changed = True
+
+        # 更新状态字段（不触发重置阅读状态）
+        if 'is_active' in data:
+            announcement.is_active = bool(data['is_active'])
+
+        # 如果内容发生变化，重置所有用户的阅读状态
+        if content_changed:
+            read_statuses = AnnouncementReadStatus.query.filter_by(announcement_id=announcement_id).all()
+            for status in read_statuses:
+                status.is_read = False
+                status.read_at = None
+
+        # 提交更改
         db.session.commit()
+        db.session.refresh(announcement)
 
         return jsonify({
             'message': '公告更新成功',
@@ -209,11 +239,13 @@ def update_announcement(current_user, announcement_id):
                 'title': announcement.title,
                 'content': announcement.content,
                 'priority': announcement.priority,
-                'is_active': announcement.is_active
+                'is_active': bool(announcement.is_active),
+                'created_at': announcement.created_at.isoformat() if announcement.created_at else None
             }
         })
 
     except Exception as e:
+        print(f"更新公告时出错：{str(e)}")
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 

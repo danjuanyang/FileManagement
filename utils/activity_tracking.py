@@ -3,10 +3,13 @@
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import request, jsonify, g
+
 from config import app, db
 from models import UserSession, UserActivityLog
 import jwt
 import re
+
+from utils.network_utils import get_real_ip
 
 
 # def create_user_session(user_id):
@@ -45,7 +48,8 @@ import re
 #         db.session.rollback()
 #         raise
 
-def create_user_session(user_id):
+
+def create_user_session(user_id, ip_address=None):
     """
     创建新的用户会话，并关闭该用户的所有旧会话
     """
@@ -67,7 +71,7 @@ def create_user_session(user_id):
         # 创建新会话
         new_session = UserSession(
             user_id=user_id,
-            ip_address=request.remote_addr if hasattr(request, 'remote_addr') else None,
+            ip_address=ip_address,  # Use the passed ip_address
             user_agent=request.user_agent.string if hasattr(request, 'user_agent') else None
         )
 
@@ -87,28 +91,11 @@ def create_user_session(user_id):
 
 
 
-# def update_user_activity(user_id):
-#     """
-#     更新用户的最后活动时间
-#     """
-#     try:
-#         active_session = UserSession.query.filter_by(
-#             user_id=user_id,
-#             is_active=True
-#         ).first()
-#
-#         if active_session:
-#             active_session.last_activity_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-#             db.session.commit()
-#     except Exception as e:
-#         print(f"Error updating user activity: {str(e)}")
-#         db.session.rollback()
 
 
+
+# 更新用户的最后活动时间
 def update_user_activity(user_id):
-    """
-    更新用户的最后活动时间
-    """
     try:
         active_session = UserSession.query.filter_by(
             user_id=user_id,
@@ -121,6 +108,7 @@ def update_user_activity(user_id):
     except Exception as e:
         print(f"Error updating user activity: {str(e)}")
         db.session.rollback()
+
 
 def check_session_timeout(user_id):
     """
@@ -150,6 +138,7 @@ def check_session_timeout(user_id):
     except Exception as e:
         print(f"检查会话超时时出错：{str(e)}")
         return False
+
 
 def check_session_timeout(user_id):
     """
@@ -307,6 +296,7 @@ def log_user_activity(user_id, action_type, action_detail=None, resource_type=No
     except Exception as e:
         print(f"错误记录活动： {str(e)}")
         db.session.rollback()
+
 
 def track_activity(f):
     """

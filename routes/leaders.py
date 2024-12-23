@@ -1,4 +1,7 @@
 # routes/leaders.py
+import string
+import random
+
 from flask import Blueprint, request, jsonify
 from flask_cors import CORS
 from sqlalchemy import desc
@@ -9,7 +12,7 @@ from models import db, Project, ProjectFile, User, StageTask, ProjectStage, Edit
 from datetime import datetime
 
 from routes.employees import token_required
-from utils.activity_tracking import track_activity
+from utils.activity_tracking import track_activity, log_user_activity
 
 leader_bp = Blueprint('leader', __name__)
 CORS(leader_bp)
@@ -83,7 +86,6 @@ def create_project(current_user):
     }), 201
 
 
-
 # 更新项目
 @leader_bp.route('/projects/<int:project_id>', methods=['PUT'])
 @token_required
@@ -148,24 +150,6 @@ def get_project_files(project_id):
             'file_size': f.file_size,
             'upload_user': f.upload_user.username,
             'upload_date': f.upload_date.isoformat()
-        } for f in files]
-    })
-
-
-# 搜索文件
-@leader_bp.route('/files/search', methods=['GET'])
-@track_activity
-def search_files():
-    keyword = request.args.get('keyword', '')
-    files = ProjectFile.query.filter(ProjectFile.file_name.ilike(f'%{keyword}%')).all()
-    return jsonify({
-        'files': [{
-            'id': f.id,
-            'file_name': f.file_name,
-            'file_type': f.file_type,
-            'file_url': f.file_url,
-            'project_name': f.project.name,
-            'upload_user': f.upload_user.username
         } for f in files]
     })
 
@@ -388,100 +372,6 @@ def get_project_list(current_user):
 
 
 # 用户管理
-# @leader_bp.route('/users', methods=['GET'])
-# @token_required
-# def get_users(current_user):
-#     if current_user.role != 1:
-#         return jsonify({'error': '权限不足'}), 403
-#
-#     try:
-#         page = request.args.get('page', 1, type=int)
-#         page_size = request.args.get('pageSize', 10, type=int)
-#         search = request.args.get('search', '')
-#         role = request.args.get('role', type=int)
-#
-#         # 构建基础查询
-#         query = User.query
-#
-#         # 添加搜索条件
-#         if search:
-#             query = query.filter(User.username.ilike(f'%{search}%'))
-#
-#         # 添加角色过滤
-#         if role:
-#             query = query.filter(User.role == role)
-#
-#         # 计算总数
-#         total = query.count()
-#
-#         # 分页
-#         users = query.paginate(page=page, per_page=page_size)
-#
-#         def parse_user_agent(user_agent_string):
-#             if not user_agent_string:
-#                 return "未知设备"
-#             try:
-#                 user_agent = parse(user_agent_string)
-#                 # 获取设备信息
-#                 if user_agent.is_mobile:
-#                     device = f"移动设备 ({user_agent.device.brand} {user_agent.device.model})"
-#                 elif user_agent.is_tablet:
-#                     device = f"平板设备 ({user_agent.device.brand} {user_agent.device.model})"
-#                 elif user_agent.is_pc:
-#                     device = f"电脑 ({user_agent.browser.family} on {user_agent.os.family})"
-#                 else:
-#                     device = f"{user_agent.browser.family} on {user_agent.os.family}"
-#                 return device
-#             except:
-#                 return "未知设备"
-#
-#         # 准备用户数据
-#         user_list = []
-#         for user in users.items:
-#             # 获取最后一次登录信息
-#             last_session = UserSession.query.filter_by(user_id=user.id).order_by(desc(UserSession.login_time)).first()
-#
-#             # 获取用户的项目
-#             projects = Project.query.filter_by(employee_id=user.id).all()
-#             project_list = [{
-#                 'id': project.id,
-#                 'name': project.name,
-#                 'progress': project.progress,
-#                 'status': project.status,
-#                 'deadline': project.deadline.isoformat() if project.deadline else None
-#             } for project in projects]
-#
-#             user_data = {
-#                 'id': user.id,
-#                 'username': user.username,
-#                 'role': user.role,
-#                 'lastLogin': {
-#                     'login_time': last_session.login_time.isoformat() if last_session else None,
-#                     'is_active': last_session.is_active if last_session else False,
-#                     'ip_address': last_session.ip_address if last_session else None,
-#                     'device_info': parse_user_agent(last_session.user_agent) if last_session else "未知设备"
-#                 } if last_session else None,
-#                 'projects': project_list,
-#                 'sessions': [{
-#                     'login_time': session.login_time.isoformat(),
-#                     'ip_address': session.ip_address,
-#                     'user_agent': session.user_agent
-#                 } for session in
-#                     UserSession.query.filter_by(user_id=user.id).order_by(desc(UserSession.login_time)).limit(5)]
-#             }
-#             user_list.append(user_data)
-#
-#         return jsonify({
-#             'items': user_list,
-#             'total': total,
-#             'page': page,
-#             'pageSize': page_size
-#         })
-#
-#     except Exception as e:
-#         return jsonify({'error': str(e)}), 500
-
-
 @leader_bp.route('/users', methods=['GET'])
 @token_required
 def get_users(current_user):
@@ -564,7 +454,7 @@ def get_users(current_user):
         })
 
     except Exception as e:
-        print(f"Error fetching users: {str(e)}")  # 添加日志
+        print(f"获取用户时出错： {str(e)}")  # 添加日志
         return jsonify({'error': str(e)}), 500
 
 
@@ -649,28 +539,6 @@ def update_user(current_user, user_id):
 
 
 # 删除用户
-# @leader_bp.route('/users/<int:user_id>', methods=['DELETE'])
-# @token_required
-# def delete_user(current_user, user_id):
-#     if current_user.role != 1:
-#         return jsonify({'error': '权限不足'}), 403
-#
-#     try:
-#         user = User.query.get_or_404(user_id)
-#
-#         # 检查是否删除自己
-#         if user.id == current_user.id:
-#             return jsonify({'error': '不能删除当前登录用户'}), 400
-#
-#         db.session.delete(user)
-#         db.session.commit()
-#
-#         return jsonify({'message': '用户删除成功'})
-#
-#     except Exception as e:
-#         db.session.rollback()
-#         return jsonify({'error': str(e)}), 500
-
 @leader_bp.route('/users/<int:user_id>', methods=['DELETE'])
 @token_required
 def delete_user(current_user, user_id):
@@ -712,3 +580,160 @@ def delete_user(current_user, user_id):
         db.session.rollback()
         print(f"删除用户错误: {str(e)}")  # 添加日志输出
         return jsonify({'error': f'删除用户失败: {str(e)}'}), 500
+
+
+# 管理员修改用户密码
+# @leader_bp.route('/users/<int:user_id>/change-password', methods=['PUT'])
+# @token_required
+# def change_user_password(current_user, user_id):
+#     if current_user.role != 1:
+#         return jsonify({'error': '权限不足'}), 403
+#
+#     try:
+#         user = User.query.get_or_404(user_id)
+#         data = request.get_json()
+#
+#         # 验证必要字段
+#         if not all(k in data for k in ('old_password', 'new_password')):
+#             return jsonify({'error': '缺少必要字段'}), 400
+#
+#         # 验证旧密码是否正确
+#         if not user.check_password(data['old_password']):
+#             return jsonify({'error': '旧密码不正确'}), 400
+#
+#         # 验证新密码
+#         new_password = data['new_password']
+#         if len(new_password) < 6:
+#             return jsonify({'error': '密码长度必须大于6位'}), 400
+#
+#         # 验证新密码复杂度（至少包含数字和字母）
+#         if not any(c.isdigit() for c in new_password) or not any(c.isalpha() for c in new_password):
+#             return jsonify({'error': '密码必须包含数字和字母'}), 400
+#
+#         # 更新密码
+#         user.set_password(new_password)
+#
+#         # 记录活动
+#         log_user_activity(
+#             user_id=current_user.id,
+#             action_type='change_password',
+#             action_detail=f'管理员修改用户 {user.username} 的密码',
+#             resource_type='user',
+#             resource_id=user.id
+#         )
+#
+#         db.session.commit()
+#
+#         return jsonify({'message': '密码修改成功'})
+#
+#     except Exception as e:
+#         db.session.rollback()
+#         return jsonify({'error': str(e)}), 500
+
+
+# 修改用户密码
+@leader_bp.route('/users/<int:user_id>/change-password', methods=['PUT'])
+@token_required
+def change_user_password(current_user, user_id):
+    if current_user.role != 1:
+        return jsonify({'error': '权限不足'}), 403
+
+    try:
+        user = User.query.get_or_404(user_id)
+        data = request.get_json()
+
+        # 验证必要字段
+        if 'new_password' not in data:
+            return jsonify({'error': '缺少必要字段'}), 400
+
+        # 验证新密码
+        new_password = data['new_password']
+        if len(new_password) < 6:
+            return jsonify({'error': '密码长度必须大于6位'}), 400
+
+        # 验证新密码复杂度（至少包含数字和字母）
+        if not any(c.isdigit() for c in new_password) or not any(c.isalpha() for c in new_password):
+            return jsonify({'error': '密码必须包含数字和字母'}), 400
+
+        # 更新密码
+        user.set_password(new_password)
+
+        # 记录活动
+        log_user_activity(
+            user_id=current_user.id,
+            action_type='change_password',
+            action_detail=f'管理员修改用户 {user.username} 的密码',
+            resource_type='user',
+            resource_id=user.id
+        )
+
+        db.session.commit()
+
+        return jsonify({'message': '密码修改成功'})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+
+# 管理员重置用户密码
+@leader_bp.route('/users/<int:user_id>/reset-password', methods=['POST'])
+@token_required
+def reset_user_password(current_user, user_id):
+    global db
+    if current_user.role != 1:
+        return jsonify({'error': '权限不足'}), 403
+
+    try:
+        user = User.query.get_or_404(user_id)
+
+        # 生成随机临时密码（12位字母数字组合）
+        chars = string.ascii_letters + string.digits
+        temp_password = ''
+        # 确保至少包含一个字母和一个数字
+        temp_password += random.choice(string.ascii_letters)  # 添加一个字母
+        temp_password += random.choice(string.digits)  # 添加一个数字
+        # 添加剩余的随机字符
+        for _ in range(10):
+            temp_password += random.choice(chars)
+
+        # 将生成的字符打乱顺序
+        temp_password_list = list(temp_password)
+        random.shuffle(temp_password_list)
+        temp_password = ''.join(temp_password_list)
+
+        # 更新密码
+        user.set_password(temp_password)
+
+        # 记录活动
+        log_user_activity(
+            user_id=current_user.id,
+            action_type='reset_password',
+            action_detail=f'管理员重置用户 {user.username} 的密码',
+            resource_type='user',
+            resource_id=user.id
+        )
+
+        # 关闭用户当前所有活动会话
+        from models import UserSession, db
+        active_sessions = UserSession.query.filter_by(
+            user_id=user.id,
+            is_active=True
+        ).all()
+
+        for session in active_sessions:
+            session.end_session()
+
+        db.session.commit()
+
+        return jsonify({
+            'message': '密码重置成功',
+            'username': user.username,
+            'temp_password': temp_password,
+            'note': '此临时密码仅显示一次，请立即保存并通知用户'
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500

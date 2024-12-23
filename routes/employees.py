@@ -12,7 +12,7 @@ from models import db, Project, ProjectFile, ProjectUpdate, ProjectStage, User, 
     StageTask, TaskProgressUpdate, EditTimeTracking
 from auth import get_employee_id
 from routes.filemanagement import allowed_file, MAX_FILE_SIZE, generate_unique_filename, create_upload_path
-from utils.activity_tracking import track_activity
+from utils.activity_tracking import track_activity, log_user_activity
 
 employee_bp = Blueprint('employee', __name__)
 CORS(employee_bp)  # 为此蓝图启用 CORS
@@ -65,7 +65,6 @@ def get_assigned_projects():
     } for p in projects])
 
 
-
 # 2024年11月1日09:05:36
 @employee_bp.route('/projects/<int:project_id>', methods=['PUT'])
 @track_activity
@@ -98,8 +97,6 @@ def update_progress(project_id):
     project.progress = data['progress']
     db.session.commit()
     return jsonify({'message': '已成功更新进度'})
-
-
 
 
 # 获取项目进度以供显示
@@ -190,9 +187,6 @@ def update_project_progress(project_id):
 
 
 # ---------------------------------
-
-
-
 
 
 # 从登录信息获取用户信息
@@ -319,9 +313,6 @@ def report_clock_in(current_user):
         return jsonify({'error': str(e)}), 500
 
 
-
-
-
 # 获取补卡记录
 
 @employee_bp.route('/report-data', methods=['GET'])
@@ -357,7 +348,8 @@ def get_report_data(current_user):
         'reported_dates': reported_dates
     })
 
-#2024年11月25日16:59:02
+
+# 2024年11月25日16:59:02
 
 # 创建任务进度更新
 @employee_bp.route('/tasks/<int:task_id>/progress-updates', methods=['POST'])
@@ -390,6 +382,7 @@ def add_task_progress_update(task_id):
 
     return jsonify({'message': '任务进度更新成功'})
 
+
 # 获取任务的进度更新记录
 @employee_bp.route('/tasks/<int:task_id>/progress-updates', methods=['GET'])
 @track_activity
@@ -403,8 +396,6 @@ def get_task_progress_updates(task_id):
         'description': update.description,
         'created_at': update.created_at.isoformat()
     } for update in updates])
-
-
 
 
 # 2024年12月13日10:05:12
@@ -537,3 +528,50 @@ def calculate_edit_stats(records):
         'edit_count': edit_count,
         'last_edit': last_edit.isoformat()
     }
+
+
+# 修改密码
+@employee_bp.route('/change-password', methods=['POST'])
+@track_activity
+@token_required
+def change_user_password(current_user):
+    try:
+        # user = User.query.get_or_404(user_id)
+        data = request.get_json()
+
+        # 验证必要字段
+        if not all(k in data for k in ('old_password', 'new_password')):
+            return jsonify({'error': '缺少必要字段'}), 400
+
+        # 验证旧密码是否正确
+        if not current_user.check_password(data['old_password']):
+            return jsonify({'error': '旧密码不正确'}), 400
+
+        # 验证新密码
+        new_password = data['new_password']
+        if len(new_password) < 6:
+            return jsonify({'error': '密码长度必须大于6位'}), 400
+
+        # 验证新密码复杂度（至少包含数字和字母）
+        if not any(c.isdigit() for c in new_password) or not any(c.isalpha() for c in new_password):
+            return jsonify({'error': '密码必须包含数字和字母'}), 400
+
+        # 更新密码
+        current_user.set_password(new_password)
+
+        # 记录活动
+        log_user_activity(
+            user_id=current_user.id,
+            action_type='change_password',
+            action_detail=f'{current_user}修改密码为新密码{new_password}',
+            resource_type='user',
+            resource_id=current_user.id
+        )
+
+        db.session.commit()
+
+        return jsonify({'message': '密码修改成功'})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500

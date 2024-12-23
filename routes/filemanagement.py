@@ -83,7 +83,6 @@ def get_user_display_name(user):
     return f"User_{user.id}" if hasattr(user, 'id') else "Unknown User"
 
 
-# 2024年11月26日15:21:31
 def create_upload_path(user_id, project_id, stage_id, task_id=None):
     """创建并返回上传路径"""
     try:
@@ -297,13 +296,105 @@ def upload_task_file(project_id, stage_id, task_id):
 # 2搜索关键词必须在文件内容中找到
 
 # 搜索
+# @files_bp.route('/search', methods=['GET'])
+# @track_activity
+# def search_files():
+#     try:
+#         search_query = request.args.get('query', '').strip()
+#         if not search_query:
+#             return jsonify({'error': 'Search query is required'}), 400
+#
+#         base_query = ProjectFile.query.options(
+#             joinedload(ProjectFile.project),
+#             joinedload(ProjectFile.stage),
+#             joinedload(ProjectFile.task),
+#             joinedload(ProjectFile.upload_user),
+#             joinedload(ProjectFile.content)
+#         )
+#
+#         search_conditions = [
+#             ProjectFile.original_name.ilike(f'%{search_query}%'),
+#             ProjectFile.file_name.ilike(f'%{search_query}%'),
+#             ProjectFile.file_type.ilike(f'%{search_query}%'),
+#             ProjectFile.file_path.ilike(f'%{search_query}%'),
+#             Project.name.ilike(f'%{search_query}%'),
+#             ProjectStage.name.ilike(f'%{search_query}%'),
+#             StageTask.name.ilike(f'%{search_query}%'),
+#             User.username.ilike(f'%{search_query}%'),
+#             FileContent.content.ilike(f'%{search_query}%')
+#         ]
+#
+#         search_results = base_query \
+#             .join(Project) \
+#             .join(ProjectStage) \
+#             .join(StageTask) \
+#             .join(User, ProjectFile.upload_user_id == User.id) \
+#             .outerjoin(FileContent) \
+#             .filter(or_(*search_conditions)) \
+#             .all()
+#
+#         results = []
+#         for file in search_results:
+#             try:
+#                 file_path = os.path.join(current_app.root_path, file.file_path)
+#                 file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+#
+#                 result = {
+#                     'id': file.id,
+#                     'fileName': file.file_name,
+#                     'originalName': highlight_text(file.original_name, search_query),
+#                     'fileType': file.file_type,
+#                     'fileSize': file_size,
+#                     'uploadTime': file.upload_date.isoformat(),
+#                     'uploader': highlight_text(file.upload_user.username, search_query),
+#                     'projectName': highlight_text(file.project.name if file.project else None, search_query),
+#                     'stageName': highlight_text(file.stage.name if file.stage else None, search_query),
+#                     'taskName': highlight_text(file.task.name if file.task else None, search_query),
+#                 }
+#
+#                 # 添加内容预览字段，并处理高亮
+#                 result['contentPreview'] = None
+#                 if file.content:
+#                     preview = get_content_preview(
+#                         file.content.content,
+#                         search_query,
+#                         context_length=150
+#                     )
+#                     if preview:
+#                         result['contentPreview'] = preview
+#                     else:
+#                         result['contentPreview'] = "无匹配内容"
+#                 else:
+#                     result['contentPreview'] = "未提取内容"
+#
+#                 results.append(result)
+#             except Exception as e:
+#                 print(f"处理文件 {file.id} 时出错: {str(e)}")
+#                 continue
+#
+#         return jsonify({
+#             'results': results,
+#             'total': len(results)
+#         })
+#
+#     except Exception as e:
+#         print(f"搜索错误: {str(e)}")
+#         return jsonify({'error': str(e)}), 500
+
+# 搜索功能，加权限，过滤用户
 @files_bp.route('/search', methods=['GET'])
 @track_activity
 def search_files():
     try:
+        # 获取当前用户 ID 和角色
+        employee_id = get_employee_id()
+        current_user = User.query.get(employee_id)
+        if not current_user:
+            return jsonify({'error': '未找到用户'}), 404
+
         search_query = request.args.get('query', '').strip()
         if not search_query:
-            return jsonify({'error': 'Search query is required'}), 400
+            return jsonify({'error': '搜索条件必填'}), 400
 
         base_query = ProjectFile.query.options(
             joinedload(ProjectFile.project),
@@ -312,6 +403,10 @@ def search_files():
             joinedload(ProjectFile.upload_user),
             joinedload(ProjectFile.content)
         )
+
+        # 添加基于角色的筛选
+        if current_user.role != 1:  # 如果不是 admin，则仅显示用户自己的文件
+            base_query = base_query.filter(ProjectFile.upload_user_id == employee_id)
 
         search_conditions = [
             ProjectFile.original_name.ilike(f'%{search_query}%'),
@@ -353,7 +448,7 @@ def search_files():
                     'taskName': highlight_text(file.task.name if file.task else None, search_query),
                 }
 
-                # 添加内容预览字段，并处理高亮
+                # 添加内容预览（如果可用）
                 result['contentPreview'] = None
                 if file.content:
                     preview = get_content_preview(
@@ -381,6 +476,7 @@ def search_files():
     except Exception as e:
         print(f"搜索错误: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
 
 
 def get_content_preview(content, query, context_length=150):

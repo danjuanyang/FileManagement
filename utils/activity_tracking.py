@@ -49,7 +49,48 @@ from utils.network_utils import get_real_ip
 #         raise
 
 
-def create_user_session(user_id, ip_address=None):
+# def create_user_session(user_id, ip_address=None):
+#     """
+#     创建新的用户会话，并关闭该用户的所有旧会话
+#     """
+#     try:
+#         # 关闭该用户的所有活动会话
+#         active_sessions = UserSession.query.filter_by(
+#             user_id=user_id,
+#             is_active=True
+#         ).all()
+#
+#         current_time = datetime.now()
+#
+#         for session in active_sessions:
+#             session.is_active = False
+#             session.logout_time = current_time
+#             if session.login_time:
+#                 session.session_duration = int((current_time - session.login_time).total_seconds())
+#
+#         # 创建新会话
+#         new_session = UserSession(
+#             user_id=user_id,
+#             ip_address=ip_address,  # Use the passed ip_address
+#             user_agent=request.user_agent.string if hasattr(request, 'user_agent') else None
+#         )
+#
+#         # 确保时间字段使用datetime对象
+#         new_session.login_time = datetime.now()
+#         new_session.last_activity_time = datetime.now()
+#
+#         db.session.add(new_session)
+#         db.session.commit()
+#
+#         return new_session.id
+#
+#     except Exception as e:
+#         print(f"创建用户会话时出错： {str(e)}")
+#         db.session.rollback()
+#         raise
+
+# 2024年12月24日09:12:25
+def create_user_session(user_id):
     """
     创建新的用户会话，并关闭该用户的所有旧会话
     """
@@ -68,16 +109,12 @@ def create_user_session(user_id, ip_address=None):
             if session.login_time:
                 session.session_duration = int((current_time - session.login_time).total_seconds())
 
-        # 创建新会话
+        # 创建新会话，使用get_real_ip()获取真实IP
         new_session = UserSession(
             user_id=user_id,
-            ip_address=ip_address,  # Use the passed ip_address
+            ip_address=get_real_ip(),
             user_agent=request.user_agent.string if hasattr(request, 'user_agent') else None
         )
-
-        # 确保时间字段使用datetime对象
-        new_session.login_time = datetime.now()
-        new_session.last_activity_time = datetime.now()
 
         db.session.add(new_session)
         db.session.commit()
@@ -88,8 +125,6 @@ def create_user_session(user_id, ip_address=None):
         print(f"创建用户会话时出错： {str(e)}")
         db.session.rollback()
         raise
-
-
 
 
 
@@ -277,12 +312,12 @@ def log_user_activity(user_id, action_type, action_detail=None, resource_type=No
         if resource_type is None and resource_id is None:
             resource_type, resource_id = extract_resource_info(endpoint, request.view_args)
 
-        # 创建活动记录时不传入 timestamp 参数，让模型的默认值处理
+        # 使用get_real_ip()获取真实IP
         activity = UserActivityLog(
             user_id=user_id,
             action_type=action_type,
             action_detail=action_detail,
-            ip_address=request.remote_addr,
+            ip_address=get_real_ip(),  # 修改这里
             resource_type=resource_type,
             resource_id=resource_id,
             status_code=status_code,

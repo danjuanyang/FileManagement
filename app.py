@@ -17,6 +17,7 @@ from routes.leaders import leader_bp
 from routes.employees import employee_bp
 from routes.projectplan import projectplan_bp
 from utils.activity_tracking import create_user_session, log_user_activity, track_activity
+from utils.network_utils import get_real_ip
 
 app.register_blueprint(leader_bp, url_prefix='/api/leader')
 app.register_blueprint(employee_bp, url_prefix='/api/employee')
@@ -26,6 +27,7 @@ app.register_blueprint(projectplan_bp, url_prefix='/api/projectplan')
 app.register_blueprint(files_bp, url_prefix='/api/files')
 
 app.register_blueprint(announcement_bp, url_prefix='/api/announcements')
+
 
 # 用户登录接口
 @app.route('/api/login', methods=['POST'])
@@ -42,7 +44,8 @@ def login():
         log_user_activity(
             user_id=user.id,
             action_type='login',
-            action_detail=f'用户登录，IP: {request.remote_addr}'
+            # action_detail=f'用户登录，IP: {request.remote_addr}'
+            action_detail=f'用户登录，IP: {get_real_ip()}'  # 修改这里
         )
 
         # 创建JWT令牌，1小时有效期
@@ -125,7 +128,7 @@ def get_activity_logs():
         # 验证管理员权限
         token = request.headers.get('Authorization').split()[1]
         data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
-        if data.get('role') != 1:  # 假设角色1是管理员
+        if data.get('role') != 0:  # 超管0
             return jsonify({'message': '权限不足'}), 403
 
         page = request.args.get('page', 1, type=int)
@@ -169,7 +172,7 @@ def get_sessions():
         # 验证管理员权限
         token = request.headers.get('Authorization').split()[1]
         data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
-        if data.get('role') != 1:
+        if data.get('role') != 0:
             return jsonify({'message': '权限不足'}), 403
 
         # 获取查询参数
@@ -201,7 +204,7 @@ def get_sessions():
         # 准备响应数据
         sessions_data = []
         for session in sessions.items:
-            user = session.user  # 假设在UserSession模型中定义了relationship
+            user = session.user  # UserSession模型中定义了relationship
             session_data = {
                 'id': session.id,
                 'user_id': session.user_id,
@@ -217,7 +220,7 @@ def get_sessions():
                 'current_duration': (
                     session.session_duration if session.session_duration
                     else int(
-                        (datetime.now() - datetime.strptime(session.login_time, '%Y-%m-%d %H:%M:%S')).total_seconds())
+                        (datetime.datetime.now() - session.login_time).total_seconds())
                     if session.is_active else None
                 )
             }
@@ -244,7 +247,6 @@ def get_sessions():
         return jsonify({'message': '无效的令牌'}), 401
     except Exception as e:
         return jsonify({'message': f'获取会话记录时发生错误: {str(e)}'}), 500
-
 
 
 # 检查当前会话状态
@@ -282,6 +284,7 @@ def check_session_status():
     except Exception as e:
         return jsonify({'message': str(e)}), 401
 
+
 # 检查用户统计信息
 @app.route('/api/admin/user-stats', methods=['GET'])
 @track_activity
@@ -291,7 +294,7 @@ def get_user_stats():
         # 验证管理员权限
         token = request.headers.get('Authorization').split()[1]
         data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
-        if data.get('role') != 1:
+        if data.get('role') != 0:
             return jsonify({'message': '权限不足'}), 403
 
         user_id = request.args.get('user_id', type=int)
@@ -302,7 +305,7 @@ def get_user_stats():
             base_query = base_query.filter_by(user_id=user_id)
 
         # 获取今天的日期
-        today = datetime.now().strftime('%Y-%m-%d')
+        today = datetime.datetime.now().strftime('%Y-%m-%d')
 
         # 获取各种统计数据
         stats = {
@@ -330,6 +333,8 @@ def get_user_stats():
     except Exception as e:
         return jsonify({'message': str(e)}), 500
 
+
+# 清理过期会话
 @app.route('/api/admin/clear-expired-sessions', methods=['POST'])
 @track_activity
 def clear_expired_sessions():
@@ -338,7 +343,7 @@ def clear_expired_sessions():
         # 验证管理员权限
         token = request.headers.get('Authorization').split()[1]
         data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
-        if data.get('role') != 1:
+        if data.get('role') != 0:
             return jsonify({'message': '权限不足'}), 403
 
         # 获取所有活动会话
@@ -346,8 +351,9 @@ def clear_expired_sessions():
         cleared_count = 0
 
         for session in active_sessions:
-            last_activity = datetime.strptime(session.last_activity_time, '%Y-%m-%d %H:%M:%S')
-            if (datetime.now() - last_activity) > datetime.timedelta(hours=1):
+            # last_activity = datetime.datetime.strptime(session.last_activity_time, '%Y-%m-%d %H:%M:%S')
+            last_activity = session.last_activity_time
+            if (datetime.datetime.now() - last_activity) > datetime.timedelta(hours=1):
                 session.end_session()
                 cleared_count += 1
 
@@ -361,11 +367,47 @@ def clear_expired_sessions():
     except Exception as e:
         return jsonify({'message': str(e)}), 500
 
+
+# 终止会话
+@app.route('/api/admin/sessions/<int:session_id>/terminate', methods=['POST'])
+@track_activity
+def terminate_session(session_id):
+    try:
+        # 验证管理员权限
+        token = request.headers.get('Authorization').split()[1]
+        data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        if data.get('role') != 0:
+            return jsonify({'message': '权限不足'}), 403
+
+        # 查找并终止会话
+        session = UserSession.query.get(session_id)
+        if not session:
+            return jsonify({'message': '会话不存在'}), 404
+
+        if session.is_active:
+            session.end_session()
+            db.session.commit()
+            return jsonify({'message': '会话已终止'}), 200
+        else:
+            return jsonify({'message': '会话已结束'}), 400
+
+    except jwt.ExpiredSignatureError:
+        return jsonify({'message': '令牌已过期'}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({'message': '无效的令牌'}), 401
+    except Exception as e:
+        return jsonify({'message': f'终止会话时发生错误: {str(e)}'}), 500
+
+
+
+
+
+
+
 #  获取当前用户的活动摘要
 @app.route('/api/user/activity-summary', methods=['GET'])
 @track_activity
 def get_user_activity_summary():
-
     try:
         token = request.headers.get('Authorization').split()[1]
         data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
@@ -403,6 +445,61 @@ def get_user_activity_summary():
             'today_activities': today_activities,
             'activity_breakdown': dict(activity_stats)
         }), 200
+
+    except Exception as e:
+        return jsonify({'message': str(e)}), 500
+
+# 获取用户活动日志
+@app.route('/api/admin/dashboard-stats', methods=['GET'])
+@track_activity
+def get_dashboard_stats():
+    try:
+        # 验证管理员权限
+        token = request.headers.get('Authorization').split()[1]
+        data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        if data.get('role') not in [0, 1]:
+            return jsonify({'message': '权限不足'}), 403
+
+        # 获取基础统计数据
+        total_users = User.query.count()
+        active_users = UserSession.query.filter_by(is_active=True).count()
+        today = datetime.now().date()
+        today_activities = UserActivityLog.query.filter(
+            db.func.date(UserActivityLog.timestamp) == today
+        ).count()
+
+        # 获取项目统计
+        projects = Project.query.all()
+        project_stats = {
+            'total': len(projects),
+            'pending': len([p for p in projects if p.status == 'pending']),
+            'ongoing': len([p for p in projects if p.status == 'ongoing']),
+            'completed': len([p for p in projects if p.status == 'completed']),
+            'overdue': len([p for p in projects if p.status == 'overdue'])
+        }
+
+        # 获取最近活动趋势
+        activity_trends = db.session.query(
+            db.func.date(UserActivityLog.timestamp).label('date'),
+            db.func.count(UserActivityLog.id).label('count')
+        ).group_by(
+            db.func.date(UserActivityLog.timestamp)
+        ).order_by(
+            db.func.date(UserActivityLog.timestamp).desc()
+        ).limit(30).all()
+
+        return jsonify({
+            'user_stats': {
+                'total_users': total_users,
+                'active_users': active_users,
+                'today_activities': today_activities
+            },
+            'project_stats': project_stats,
+            'activity_trends': [
+                {'date': str(date), 'count': count}
+                for date, count in activity_trends
+            ]
+        })
 
     except Exception as e:
         return jsonify({'message': str(e)}), 500

@@ -146,7 +146,7 @@ def update_task(task_id):
     task.status = data.get('status', task.status)
     task.progress = data.get('progress', task.progress)
 
-    # 2024年12月12日11:50:37
+
     # 如果有追踪 ID，更新编辑时间记录
     if tracking_id:
         tracking = EditTimeTracking.query.get(tracking_id)

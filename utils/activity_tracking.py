@@ -89,7 +89,7 @@ from utils.network_utils import get_real_ip
 #         db.session.rollback()
 #         raise
 
-# 2024年12月24日09:12:25
+
 def create_user_session(user_id):
     """
     创建新的用户会话，并关闭该用户的所有旧会话
@@ -175,47 +175,47 @@ def check_session_timeout(user_id):
         return False
 
 
-def check_session_timeout(user_id):
-    """
-    检查用户会话是否超时（1小时无活动）
-    返回 True 如果会话有效，False 如果会话已超时
-    """
-    try:
-        active_session = UserSession.query.filter_by(
-            user_id=user_id,
-            is_active=True
-        ).first()
-
-        if not active_session:
-            return False
-
-        # 确保时间格式的一致性
-        if isinstance(active_session.last_activity_time, datetime):
-            last_activity = active_session.last_activity_time
-        else:
-            last_activity = datetime.strptime(active_session.last_activity_time, '%Y-%m-%d %H:%M:%S')
-
-        timeout_threshold = datetime.now() - timedelta(hours=1)
-
-        if last_activity < timeout_threshold:
-            # 会话超时，更新会话状态
-            current_time = datetime.now()
-            active_session.is_active = False
-            active_session.logout_time = current_time.strftime('%Y-%m-%d %H:%M:%S')
-
-            # 计算会话持续时间
-            login_time = (datetime.strptime(active_session.login_time, '%Y-%m-%d %H:%M:%S')
-                          if isinstance(active_session.login_time, str)
-                          else active_session.login_time)
-            active_session.session_duration = int((current_time - login_time).total_seconds())
-
-            db.session.commit()
-            return False
-
-        return True
-    except Exception as e:
-        print(f"Error checking session timeout: {str(e)}")
-        return False
+# def check_session_timeout(user_id):
+#     """
+#     检查用户会话是否超时（1小时无活动）
+#     返回 True 如果会话有效，False 如果会话已超时
+#     """
+#     try:
+#         active_session = UserSession.query.filter_by(
+#             user_id=user_id,
+#             is_active=True
+#         ).first()
+#
+#         if not active_session:
+#             return False
+#
+#         # 确保时间格式的一致性
+#         if isinstance(active_session.last_activity_time, datetime):
+#             last_activity = active_session.last_activity_time
+#         else:
+#             last_activity = datetime.strptime(active_session.last_activity_time, '%Y-%m-%d %H:%M:%S')
+#
+#         timeout_threshold = datetime.now() - timedelta(hours=1)
+#
+#         if last_activity < timeout_threshold:
+#             # 会话超时，更新会话状态
+#             current_time = datetime.now()
+#             active_session.is_active = False
+#             active_session.logout_time = current_time.strftime('%Y-%m-%d %H:%M:%S')
+#
+#             # 计算会话持续时间
+#             login_time = (datetime.strptime(active_session.login_time, '%Y-%m-%d %H:%M:%S')
+#                           if isinstance(active_session.login_time, str)
+#                           else active_session.login_time)
+#             active_session.session_duration = int((current_time - login_time).total_seconds())
+#
+#             db.session.commit()
+#             return False
+#
+#         return True
+#     except Exception as e:
+#         print(f"检查会话超时时出错： {str(e)}")
+#         return False
 
 
 def extract_resource_info(endpoint, view_args):

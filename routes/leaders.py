@@ -88,13 +88,61 @@ def create_project(current_user):
 
 
 # 更新项目
+# @leader_bp.route('/projects/<int:project_id>', methods=['PUT'])
+# @token_required
+# def update_project(project_id):
+#     project = Project.query.get_or_404(project_id)
+#     data = request.get_json()
+#
+#     # 明确定义可更新的字段及其处理方式
+#     update_handlers = {
+#         'name': lambda x: x,
+#         'description': lambda x: x,
+#         'status': lambda x: x,
+#         'progress': lambda x: x,
+#         'start_date': lambda x: datetime.fromisoformat(x),
+#         'deadline': lambda x: datetime.fromisoformat(x),
+#         'employee': lambda x: User.query.get(x) if x else None,
+#         'employee_id': lambda x: User.query.get(x) if x else None
+#     }
+#
+#     try:
+#         for key, value in data.items():
+#             if key in update_handlers:
+#                 if key == 'employee' or key == 'employee_id':
+#                     if value:
+#                         employee = User.query.get(value)
+#                         if employee is None:
+#                             return jsonify({'error': f'员工ID {value} 不存在'}), 400
+#                         project.employee = employee
+#                 else:
+#                     processed_value = update_handlers[key](value)
+#                     setattr(project, key, processed_value)
+#         db.session.commit()
+#         return jsonify({
+#             'message': '项目更新成功',
+#             'project': {
+#                 'id': project.id,
+#                 'name': project.name,
+#                 'description': project.description,
+#                 'employee': project.employee.username if project.employee else None,
+#                 'start_date': project.start_date.isoformat() if project.start_date else None,
+#                 'deadline': project.deadline.isoformat() if project.deadline else None,
+#                 'progress': project.progress,
+#                 'status': project.status
+#             }
+#         })
+#     except Exception as e:
+#         db.session.rollback()
+#         return jsonify({'error': str(e)}), 500
+
 @leader_bp.route('/projects/<int:project_id>', methods=['PUT'])
 @token_required
-def update_project(project_id):
+def update_project(current_user, project_id):  # 修改函数签名，接收 current_user 参数
     project = Project.query.get_or_404(project_id)
     data = request.get_json()
 
-    # 明确定义可更新的字段及其处理方式
+    # 更新处理程序保持不变
     update_handlers = {
         'name': lambda x: x,
         'description': lambda x: x,
@@ -118,6 +166,7 @@ def update_project(project_id):
                 else:
                     processed_value = update_handlers[key](value)
                     setattr(project, key, processed_value)
+
         db.session.commit()
         return jsonify({
             'message': '项目更新成功',
@@ -135,6 +184,8 @@ def update_project(project_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
+
+
 
 
 # 查看项目文件

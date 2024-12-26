@@ -213,7 +213,6 @@ def get_stage_task_files(stage_id, task_id):
         return jsonify({'error': str(e)}), 500
 
 
-# 2024年11月28日10:08:45
 # 上传文件，带索引
 @files_bp.route('/<int:project_id>/stages/<int:stage_id>/tasks/<int:task_id>/upload', methods=['POST'])
 @track_activity
@@ -288,8 +287,6 @@ def upload_task_file(project_id, stage_id, task_id):
     return jsonify({'message': '文件上传成功', 'file_id': project_file.id})
 
 
-# 搜索文件
-# 2024年11月28日14:09:03
 # 搜索文件
 # contentPreview 字段只有在满足两个条件时才会被添加到结果中：
 # 1文件必须有关联的内容（即 file.content 不为 None）

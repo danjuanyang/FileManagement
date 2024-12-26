@@ -75,7 +75,6 @@ def extract_text_from_docx(file_path):
         return None
 
 
-# 2024年12月4日16:47:44
 # 修改 extract_text_from_pdf 函数来处理 fitz 导入失败的情况
 def extract_text_from_pdf(file_path):
     """提取PDF文档内容"""

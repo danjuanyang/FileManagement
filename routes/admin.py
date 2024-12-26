@@ -277,3 +277,165 @@ def logout():
 
     except Exception as e:
         return jsonify({'message': str(e)}), 401
+
+
+# 销毁会话
+@admin_bp.route('/sessions/<int:session_id>/terminate', methods=['POST'])
+@track_activity
+def terminate_session(session_id):
+    """终止指定的会话"""
+    try:
+        # 验证管理员权限
+        token = request.headers.get('Authorization').split()[1]
+        data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        if data.get('role') != 0:
+            return jsonify({'message': '权限不足'}), 403
+
+        # 查找并终止会话
+        session = UserSession.query.get(session_id)
+        if not session:
+            return jsonify({'message': '会话不存在'}), 404
+
+        if session.is_active:
+            session.end_session()
+            db.session.commit()
+            return jsonify({'message': '会话已终止'}), 200
+        else:
+            return jsonify({'message': '会话已结束'}), 400
+
+    except jwt.ExpiredSignatureError:
+        return jsonify({'message': '令牌已过期'}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({'message': '无效的令牌'}), 401
+    except Exception as e:
+        return jsonify({'message': f'终止会话时发生错误: {str(e)}'}), 500
+
+
+# 检查用户统计信息
+@admin_bp.route('/user-stats', methods=['GET'])
+@track_activity
+def get_user_stats():
+    """获取用户统计信息"""
+    try:
+        # 验证管理员权限
+        token = request.headers.get('Authorization').split()[1]
+        data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        if data.get('role') != 0:
+            return jsonify({'message': '权限不足'}), 403
+
+        user_id = request.args.get('user_id', type=int)
+
+        # 基础查询
+        base_query = UserActivityLog.query
+        if user_id:
+            base_query = base_query.filter_by(user_id=user_id)
+
+        # 获取今天的日期
+        today = datetime.datetime.now().strftime('%Y-%m-%d')
+
+        # 获取各种统计数据
+        stats = {
+            'total_activities': base_query.count(),
+            'today_activities': base_query.filter(
+                UserActivityLog.timestamp.like(f'{today}%')
+            ).count(),
+            'login_count': base_query.filter_by(
+                action_type='login'
+            ).count(),
+            'total_sessions': UserSession.query.filter_by(
+                user_id=user_id
+            ).count() if user_id else UserSession.query.count()
+        }
+
+        # 获取活动用户数
+        active_users = db.session.query(UserSession.user_id).filter_by(
+            is_active=True
+        ).distinct().count()
+
+        stats['active_users'] = active_users
+
+        return jsonify(stats), 200
+
+    except Exception as e:
+        return jsonify({'message': str(e)}), 500
+
+
+# 清理过期会话
+@admin_bp.route('/clear-expired-sessions', methods=['POST'])
+@track_activity
+def clear_expired_sessions():
+    """清理过期会话"""
+    try:
+        # 验证管理员权限
+        token = request.headers.get('Authorization').split()[1]
+        data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        if data.get('role') != 0:
+            return jsonify({'message': '权限不足'}), 403
+
+        # 获取所有活动会话
+        active_sessions = UserSession.query.filter_by(is_active=True).all()
+        cleared_count = 0
+
+        for session in active_sessions:
+            # last_activity = datetime.datetime.strptime(session.last_activity_time, '%Y-%m-%d %H:%M:%S')
+            last_activity = session.last_activity_time
+            if (datetime.datetime.now() - last_activity) > datetime.timedelta(hours=1):
+                session.end_session()
+                cleared_count += 1
+
+        db.session.commit()
+
+        return jsonify({
+            'message': f'已清理 {cleared_count} 个过期会话',
+            'cleared_count': cleared_count
+        }), 200
+
+    except Exception as e:
+        return jsonify({'message': str(e)}), 500
+
+
+
+#  获取当前用户的活动摘要
+@admin_bp.route('/activity-summary', methods=['GET'])
+@track_activity
+def get_user_activity_summary():
+    try:
+        token = request.headers.get('Authorization').split()[1]
+        data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        user_id = data['user_id']
+
+        # 获取用户的最后一个会话
+        last_session = UserSession.query.filter_by(
+            user_id=user_id
+        ).order_by(UserSession.id.desc()).first()
+
+        # 获取今天的活动数量
+        today = datetime.datetime.now().strftime('%Y-%m-%d')
+        today_activities = UserActivityLog.query.filter_by(
+            user_id=user_id
+        ).filter(
+            UserActivityLog.timestamp.like(f'{today}%')
+        ).count()
+
+        # 获取用户的总活动统计
+        activity_stats = db.session.query(
+            UserActivityLog.action_type,
+            db.func.count(UserActivityLog.id)
+        ).filter_by(
+            user_id=user_id
+        ).group_by(
+            UserActivityLog.action_type
+        ).all()
+
+        return jsonify({
+            'last_session': {
+                'login_time': last_session.login_time if last_session else None,
+                'is_active': last_session.is_active if last_session else False,
+                'duration': last_session.session_duration if last_session else None
+            },
+            'today_activities': today_activities,
+            'activity_breakdown': dict(activity_stats)
+        }), 200
+
+    except Exception as e:
+        return jsonify({'message': str(e)}), 500

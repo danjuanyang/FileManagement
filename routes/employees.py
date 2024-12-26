@@ -65,7 +65,6 @@ def get_assigned_projects():
     } for p in projects])
 
 
-# 2024年11月1日09:05:36
 @employee_bp.route('/projects/<int:project_id>', methods=['PUT'])
 @track_activity
 def update_project(project_id):
@@ -191,11 +190,40 @@ def update_project_progress(project_id):
 
 # 从登录信息获取用户信息
 # Token 验证装饰器
+# def token_required(f):
+#     @wraps(f)
+#     def decorated(*args, **kwargs):
+#         token = None
+#         # 从请求头中获取 token
+#         if 'Authorization' in request.headers:
+#             auth_header = request.headers['Authorization']
+#             try:
+#                 token = auth_header.split(" ")[1]  # Bearer <token>
+#             except IndexError:
+#                 return jsonify({'message': '无效的token格式'}), 401
+#
+#         if not token:
+#             return jsonify({'message': 'token缺失'}), 401
+#
+#         try:
+#             # 验证 token
+#             data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+#             current_user = User.query.filter_by(id=data['user_id']).first()
+#             if not current_user:
+#                 return jsonify({'message': '用户不存在'}), 401
+#         except jwt.ExpiredSignatureError:
+#             return jsonify({'message': 'token已过期'}), 401
+#         except jwt.InvalidTokenError:
+#             return jsonify({'message': '无效的token'}), 401
+#
+#         return f(current_user, *args, **kwargs)
+#
+#     return decorated
+
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         token = None
-        # 从请求头中获取 token
         if 'Authorization' in request.headers:
             auth_header = request.headers['Authorization']
             try:
@@ -207,19 +235,26 @@ def token_required(f):
             return jsonify({'message': 'token缺失'}), 401
 
         try:
-            # 验证 token
             data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
             current_user = User.query.filter_by(id=data['user_id']).first()
+
             if not current_user:
                 return jsonify({'message': '用户不存在'}), 401
+
+            # 检查函数参数中是否已经有 current_user
+            if 'current_user' in kwargs:
+                return f(*args, **kwargs)
+            else:
+                # 保持原有的参数传递方式
+                return f(current_user, *args, **kwargs)
+
         except jwt.ExpiredSignatureError:
             return jsonify({'message': 'token已过期'}), 401
         except jwt.InvalidTokenError:
             return jsonify({'message': '无效的token'}), 401
 
-        return f(current_user, *args, **kwargs)
-
     return decorated
+
 
 
 # 获取用户个人信息接口
@@ -349,7 +384,6 @@ def get_report_data(current_user):
     })
 
 
-# 2024年11月25日16:59:02
 
 # 创建任务进度更新
 @employee_bp.route('/tasks/<int:task_id>/progress-updates', methods=['POST'])
@@ -398,7 +432,6 @@ def get_task_progress_updates(task_id):
     } for update in updates])
 
 
-# 2024年12月13日10:05:12
 # 检测任务编辑时间
 @employee_bp.route('/tasks/<int:task_id>/edit-time', methods=['GET'])
 @track_activity

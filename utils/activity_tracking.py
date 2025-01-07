@@ -11,85 +11,6 @@ import re
 
 from utils.network_utils import get_real_ip
 
-
-# def create_user_session(user_id):
-#     """
-#     创建新的用户会话，并关闭该用户的所有旧会话
-#     """
-#     try:
-#         # 关闭该用户的所有活动会话
-#         active_sessions = UserSession.query.filter_by(
-#             user_id=user_id,
-#             is_active=True
-#         ).all()
-#
-#         current_time = datetime.now()
-#
-#         for session in active_sessions:
-#             session.is_active = False
-#             session.logout_time = current_time
-#             if session.login_time:
-#                 session.session_duration = int((current_time - session.login_time).total_seconds())
-#
-#         # 创建新会话，只传入必要的参数
-#         new_session = UserSession(
-#             user_id=user_id,
-#             ip_address=request.remote_addr if hasattr(request, 'remote_addr') else None,
-#             user_agent=request.user_agent.string if hasattr(request, 'user_agent') else None
-#         )
-#
-#         db.session.add(new_session)
-#         db.session.commit()
-#
-#         return new_session.id
-#
-#     except Exception as e:
-#         print(f"创建用户会话时出错： {str(e)}")
-#         db.session.rollback()
-#         raise
-
-
-# def create_user_session(user_id, ip_address=None):
-#     """
-#     创建新的用户会话，并关闭该用户的所有旧会话
-#     """
-#     try:
-#         # 关闭该用户的所有活动会话
-#         active_sessions = UserSession.query.filter_by(
-#             user_id=user_id,
-#             is_active=True
-#         ).all()
-#
-#         current_time = datetime.now()
-#
-#         for session in active_sessions:
-#             session.is_active = False
-#             session.logout_time = current_time
-#             if session.login_time:
-#                 session.session_duration = int((current_time - session.login_time).total_seconds())
-#
-#         # 创建新会话
-#         new_session = UserSession(
-#             user_id=user_id,
-#             ip_address=ip_address,  # Use the passed ip_address
-#             user_agent=request.user_agent.string if hasattr(request, 'user_agent') else None
-#         )
-#
-#         # 确保时间字段使用datetime对象
-#         new_session.login_time = datetime.now()
-#         new_session.last_activity_time = datetime.now()
-#
-#         db.session.add(new_session)
-#         db.session.commit()
-#
-#         return new_session.id
-#
-#     except Exception as e:
-#         print(f"创建用户会话时出错： {str(e)}")
-#         db.session.rollback()
-#         raise
-
-
 def create_user_session(user_id):
     """
     创建新的用户会话，并关闭该用户的所有旧会话
@@ -175,48 +96,6 @@ def check_session_timeout(user_id):
         return False
 
 
-# def check_session_timeout(user_id):
-#     """
-#     检查用户会话是否超时（1小时无活动）
-#     返回 True 如果会话有效，False 如果会话已超时
-#     """
-#     try:
-#         active_session = UserSession.query.filter_by(
-#             user_id=user_id,
-#             is_active=True
-#         ).first()
-#
-#         if not active_session:
-#             return False
-#
-#         # 确保时间格式的一致性
-#         if isinstance(active_session.last_activity_time, datetime):
-#             last_activity = active_session.last_activity_time
-#         else:
-#             last_activity = datetime.strptime(active_session.last_activity_time, '%Y-%m-%d %H:%M:%S')
-#
-#         timeout_threshold = datetime.now() - timedelta(hours=1)
-#
-#         if last_activity < timeout_threshold:
-#             # 会话超时，更新会话状态
-#             current_time = datetime.now()
-#             active_session.is_active = False
-#             active_session.logout_time = current_time.strftime('%Y-%m-%d %H:%M:%S')
-#
-#             # 计算会话持续时间
-#             login_time = (datetime.strptime(active_session.login_time, '%Y-%m-%d %H:%M:%S')
-#                           if isinstance(active_session.login_time, str)
-#                           else active_session.login_time)
-#             active_session.session_duration = int((current_time - login_time).total_seconds())
-#
-#             db.session.commit()
-#             return False
-#
-#         return True
-#     except Exception as e:
-#         print(f"检查会话超时时出错： {str(e)}")
-#         return False
-
 
 def extract_resource_info(endpoint, view_args):
     """
@@ -248,48 +127,6 @@ def extract_resource_info(endpoint, view_args):
 
     return None, None
 
-
-# def log_user_activity(user_id, action_type, action_detail=None, resource_type=None,
-#                       resource_id=None, status_code=None, request_method=None,
-#                       endpoint=None, request_path=None):
-#     """
-#     记录用户活动
-#     """
-#     try:
-#         # 如果没有提供状态码，尝试从 g 对象获取
-#         if status_code is None and hasattr(g, 'response_status_code'):
-#             status_code = g.response_status_code
-#
-#         # 如果没有提供请求方法和端点，从当前请求获取
-#         if request_method is None:
-#             request_method = request.method
-#         if endpoint is None:
-#             endpoint = request.endpoint
-#         if request_path is None:
-#             request_path = request.path
-#
-#         # 如果没有提供资源信息，尝试从URL提取
-#         if resource_type is None and resource_id is None:
-#             resource_type, resource_id = extract_resource_info(endpoint, request.view_args)
-#
-#         activity = UserActivityLog(
-#             user_id=user_id,
-#             action_type=action_type,
-#             action_detail=action_detail,
-#             ip_address=request.remote_addr,
-#             resource_type=resource_type,
-#             resource_id=resource_id,
-#             status_code=status_code,
-#             request_method=request_method,
-#             endpoint=endpoint,
-#             request_path=request_path
-#         )
-#
-#         db.session.add(activity)
-#         db.session.commit()
-#     except Exception as e:
-#         print(f"错误记录活动： {str(e)}")
-#         db.session.rollback()
 
 
 def log_user_activity(user_id, action_type, action_detail=None, resource_type=None,

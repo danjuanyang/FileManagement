@@ -1,12 +1,16 @@
 # filemanagement.py
+import io
 import re
 import sys
 
+
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.opc.oxml import qn
 from flask import Blueprint
 from flask_cors import CORS
 from datetime import datetime
 import jwt
-from sqlalchemy import or_, text
+from sqlalchemy import or_, text, func
 from sqlalchemy.orm import joinedload
 from werkzeug.utils import secure_filename
 from flask import Blueprint, request, jsonify, send_file, abort, current_app
@@ -16,11 +20,16 @@ import os
 from models import db, Project, ProjectFile, ProjectStage, User, StageTask, FileContent
 from auth import get_employee_id
 from utils.activity_tracking import track_activity
-
+from docx import Document
 # 搜索
 
 from .file_indexer import update_file_index, get_mime_type, create_file_index
 
+from werkzeug.utils import secure_filename
+from docx.opc.constants import RELATIONSHIP_TYPE as RT
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.oxml import parse_xml
+from docx.oxml.ns import qn
 # 测试开发 使用本路径
 # 获取Python解释器所在目录
 python_dir = os.path.dirname(sys.executable)
@@ -722,3 +731,175 @@ def get_content_preview(content, query, context_length=150):
     except Exception as e:
         print(f"生成预览错误: {str(e)}")
         return None
+
+
+# 导出文件列表
+@files_bp.route('/export', methods=['GET'])
+@track_activity
+def export_file_list():
+    try:
+        # 获取当前登录用户
+        current_user_id = get_employee_id()
+        current_user = User.query.get(current_user_id)
+        if not current_user:
+            return jsonify({'error': '未找到用户'}), 404
+
+        # 构建基础查询
+        base_query = db.session.query(
+            ProjectFile,
+            Project.name.label('project_name'),
+            ProjectStage.name.label('stage_name'),
+            StageTask.name.label('task_name'),
+            User.username.label('uploader_name')
+        ).join(
+            Project, ProjectFile.project_id == Project.id
+        ).join(
+            ProjectStage, ProjectFile.stage_id == ProjectStage.id
+        ).join(
+            StageTask, ProjectFile.task_id == StageTask.id
+        ).join(
+            User, ProjectFile.upload_user_id == User.id
+        )
+
+        # 根据用户角色筛选数据
+        if current_user.role != 1:  # 如果不是管理员，只能看到自己的文件
+            base_query = base_query.filter(ProjectFile.upload_user_id == current_user_id)
+
+        # 执行查询，并按项目、阶段、任务、上传时间排序
+        files_query = base_query.order_by(
+            Project.name,
+            ProjectStage.name,
+            StageTask.name,
+            ProjectFile.upload_date
+        ).all()
+
+        # 统计信息查询（同样需要加入权限过滤）
+        stats_query = db.session.query(
+            func.count(ProjectFile.id).label('total_files')
+        )
+        if current_user.role != 1:
+            stats_query = stats_query.filter(ProjectFile.upload_user_id == current_user_id)
+        stats = stats_query.first()
+
+        # 计算实际文件大小总和
+        total_size = 0
+        for file_data in files_query:
+            file = file_data[0]  # ProjectFile对象在第一个位置
+            file_path = os.path.join(current_app.root_path, file.file_path)
+            if os.path.exists(file_path):
+                total_size += os.path.getsize(file_path)
+
+        # 创建Word文档
+        doc = Document()
+
+        # 设置中文字体
+        style = doc.styles['Normal']
+        style.font.name = 'Times New Roman'
+        style._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
+
+        # 设置标题字体
+        for i in range(1, 4):
+            heading_style = doc.styles[f'Heading {i}']
+            heading_style.font.name = 'Times New Roman'
+            heading_style._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
+
+        # 添加标题和基本信息
+        title = doc.add_heading(f'{current_user.username}的文件管理报告', 0)
+        title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+
+        doc.add_paragraph(f'导出时间：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+        doc.add_paragraph(f'导出用户：{current_user.username}')
+        doc.add_paragraph(f'文件总数：{stats.total_files or 0}个')
+        doc.add_paragraph(f'文件总大小：{format_file_size(total_size)}')
+        doc.add_paragraph()
+
+        # 按项目、阶段、任务组织文件列表
+        current_project = None
+        current_stage = None
+        current_task = None
+
+        for file_data in files_query:
+            file, project_name, stage_name, task_name, uploader = file_data
+
+            # 项目层级
+            if current_project != project_name:
+                current_project = project_name
+                doc.add_heading(f'项目：{project_name}', level=1)
+                current_stage = None
+                current_task = None
+
+            # 阶段层级
+            if current_stage != stage_name:
+                current_stage = stage_name
+                doc.add_heading(f'阶段：{stage_name}', level=2)
+                current_task = None
+
+            # 任务层级
+            if current_task != task_name:
+                current_task = task_name
+                doc.add_heading(f'任务：{task_name}', level=3)
+
+                # 添加文件列表表格
+                table = doc.add_table(rows=1, cols=4)
+                table.style = 'Table Grid'
+
+                # 设置表格标题行字体
+                header_cells = table.rows[0].cells
+                for cell in header_cells:
+                    paragraph = cell.paragraphs[0]
+                    run = paragraph.runs[0] if paragraph.runs else paragraph.add_run()
+                    run.font.name = 'Times New Roman'
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
+
+                header_cells[0].text = '文件名'
+                header_cells[1].text = '文件大小'
+                header_cells[2].text = '上传时间'
+                header_cells[3].text = '上传者'
+
+            # 添加文件信息到表格
+            file_path = os.path.join(current_app.root_path, file.file_path)
+            file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+
+            row_cells = table.add_row().cells
+
+            # 设置表格内容字体
+            for i, text in enumerate([
+                file.original_name,
+                format_file_size(file_size),
+                file.upload_date.strftime("%Y-%m-%d %H:%M:%S"),
+                uploader
+            ]):
+                paragraph = row_cells[i].paragraphs[0]
+                run = paragraph.add_run(text)
+                run.font.name = 'Times New Roman'
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
+
+        # 保存文档到内存
+        doc_stream = io.BytesIO()
+        doc.save(doc_stream)
+        doc_stream.seek(0)
+
+        # 生成安全的文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f'{current_user.username}_文件管理报告_{timestamp}.docx'
+        filename = filename.encode('utf-8').decode('utf-8')  # 确保正确的UTF-8编码
+
+        return send_file(
+            doc_stream,
+            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            as_attachment=True,
+            download_name=filename
+        )
+
+    except Exception as e:
+        print(f"导出文件列表失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+def format_file_size(size):
+    """格式化文件大小"""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size < 1024:
+            return f"{size:.2f} {unit}"
+        size /= 1024
+    return f"{size:.2f} TB"

@@ -3,7 +3,6 @@ import io
 import re
 import sys
 
-
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx.opc.oxml import qn
 from flask import Blueprint
@@ -17,7 +16,7 @@ from flask import Blueprint, request, jsonify, send_file, abort, current_app
 from flask_cors import CORS
 from flask import jsonify, request
 import os
-from models import db, Project, ProjectFile, ProjectStage, User, StageTask, FileContent
+from models import db, Project, ProjectFile, ProjectStage, User, StageTask, FileContent, UserActivityLog
 from auth import get_employee_id
 from utils.activity_tracking import track_activity
 from docx import Document
@@ -30,6 +29,7 @@ from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx.oxml import parse_xml
 from docx.oxml.ns import qn
+
 # 测试开发 使用本路径
 # 获取Python解释器所在目录
 python_dir = os.path.dirname(sys.executable)
@@ -39,14 +39,12 @@ ALLOWED_EXTENSIONS = {'doc', 'docx', 'pdf', 'xls', 'xlsx', 'txt', 'zip', 'rar'}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 BASE_UPLOAD_FOLDER = os.path.join(python_dir, 'uploads')  # 基础上传目录
 
-
 # 群晖路径
 # python_dir  = '/volume1/web/FileManagementFolder/db'
 # UPLOAD_FOLDER = '/volume1/web/FileManagementFolder/uploads'
 # ALLOWED_EXTENSIONS = {'doc', 'docx', 'pdf', 'xls', 'xlsx', 'txt', 'zip', 'rar'}
 # MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 # BASE_UPLOAD_FOLDER = os.path.join(python_dir, 'uploads')  # 基础上传目录
-
 
 
 files_bp = Blueprint('files', __name__)
@@ -212,7 +210,8 @@ def get_stage_task_files(stage_id, task_id):
                 'uploadTime': file.upload_date.isoformat(),
                 'uploader': uploader_name,
                 'stageName': file.stage.name if file.stage else None,
-                'taskName': file.task.name if file.task else None
+                'taskName': file.task.name if file.task else None,
+                'is_public': file.is_public
             })
 
         return jsonify(files_data)
@@ -227,6 +226,8 @@ def get_stage_task_files(stage_id, task_id):
 @track_activity
 def upload_task_file(project_id, stage_id, task_id):
     file = request.files.get('file')
+    is_public = request.form.get('is_public', 'false').lower() == 'true'  # 获取是否公开的参数
+
     if not file:
         return jsonify({'error': '请提供文件'}), 400
 
@@ -255,8 +256,6 @@ def upload_task_file(project_id, stage_id, task_id):
         unique_filename = generate_unique_filename(absolute_path, file.filename)
         file_path = os.path.join(absolute_path, unique_filename)
         file.save(file_path)
-
-        # 获取MIME类型
         mime_type = get_mime_type(file.filename) or file.content_type
     except Exception as e:
         return jsonify({'error': f'保存文件失败: {str(e)}'}), 500
@@ -273,21 +272,21 @@ def upload_task_file(project_id, stage_id, task_id):
             file_path=os.path.join(relative_path, unique_filename),
             upload_user_id=employee_id,
             upload_date=datetime.now(),
-            text_extracted=False
+            text_extracted=False,
+            is_public=is_public  # 设置是否公开
         )
         db.session.add(project_file)
         db.session.commit()
 
-        # 异步创建文件索引（这里简单处理，实际项目中建议使用Celery等异步任务队列）
+        # 创建文件索引
         try:
             file_path = os.path.join(current_app.root_path, project_file.file_path)
             if update_file_index(project_file.id, file_path, mime_type):
-                print(f"File index created successfully for file {project_file.id}")
+                print(f"已成功为 file 创建文件索引 {project_file.id}")
             else:
-                print(f"Failed to create file index for file {project_file.id}")
+                print(f"无法为 file 创建文件索引 {project_file.id}")
         except Exception as e:
-            print(f"Error creating file index: {str(e)}")
-            # 继续执行，不影响文件上传
+            print(f"创建文件索引时出错: {str(e)}")
 
     except Exception as e:
         db.session.rollback()
@@ -387,7 +386,10 @@ def upload_task_file(project_id, stage_id, task_id):
 #         print(f"搜索错误: {str(e)}")
 #         return jsonify({'error': str(e)}), 500
 
-# 搜索功能，加权限，过滤用户
+
+
+
+# 搜索功能，加权限展示，加公开属性
 @files_bp.route('/search', methods=['GET'])
 @track_activity
 def search_files():
@@ -399,6 +401,8 @@ def search_files():
             return jsonify({'error': '未找到用户'}), 404
 
         search_query = request.args.get('query', '').strip()
+        visibility = request.args.get('visibility', '')  # 获取可见性筛选参数
+
         if not search_query:
             return jsonify({'error': '搜索条件必填'}), 400
 
@@ -410,9 +414,26 @@ def search_files():
             joinedload(ProjectFile.content)
         )
 
-        # 添加基于角色的筛选
-        if current_user.role != 1:  # 如果不是 admin，则仅显示用户自己的文件
-            base_query = base_query.filter(ProjectFile.upload_user_id == employee_id)
+        # 修改权限筛选逻辑，加入可见性筛选
+        if current_user.role != 1:  # 不是管理员
+            if visibility == 'public':
+                base_query = base_query.filter(ProjectFile.is_public == True)
+            elif visibility == 'private':
+                base_query = base_query.filter(
+                    ProjectFile.upload_user_id == employee_id
+                )
+            else:
+                base_query = base_query.filter(
+                    or_(
+                        ProjectFile.upload_user_id == employee_id,
+                        ProjectFile.is_public == True
+                    )
+                )
+        else:  # 管理员可以看到所有文件，但仍然应用可见性筛选
+            if visibility == 'public':
+                base_query = base_query.filter(ProjectFile.is_public == True)
+            elif visibility == 'private':
+                base_query = base_query.filter(ProjectFile.is_public == False)
 
         search_conditions = [
             ProjectFile.original_name.ilike(f'%{search_query}%'),
@@ -452,20 +473,17 @@ def search_files():
                     'projectName': highlight_text(file.project.name if file.project else None, search_query),
                     'stageName': highlight_text(file.stage.name if file.stage else None, search_query),
                     'taskName': highlight_text(file.task.name if file.task else None, search_query),
+                    'is_public': file.is_public  # 添加可见性字段
                 }
 
-                # 添加内容预览（如果可用）
-                result['contentPreview'] = None
+                # 添加内容预览
                 if file.content:
                     preview = get_content_preview(
                         file.content.content,
                         search_query,
                         context_length=150
                     )
-                    if preview:
-                        result['contentPreview'] = preview
-                    else:
-                        result['contentPreview'] = "无匹配内容"
+                    result['contentPreview'] = preview if preview else "无匹配内容"
                 else:
                     result['contentPreview'] = "未提取内容"
 
@@ -485,6 +503,7 @@ def search_files():
 
 
 
+# 获取内容预览
 def get_content_preview(content, query, context_length=150):
     """
     获取匹配内容的上下文预览，突出显示匹配的文本
@@ -665,30 +684,6 @@ def get_user_info_from_token():
     except Exception as e:
         print(f"令牌处理中出现意外错误: {str(e)}")
         return None
-
-
-# def get_content_preview(content, query, context_length=100):
-#     """获取匹配内容的上下文预览"""
-#     if not content:
-#         return None
-#
-#     try:
-#         index = content.lower().find(query.lower())
-#         if index == -1:
-#             return None
-#
-#         start = max(0, index - context_length // 2)
-#         end = min(len(content), index + len(query) + context_length // 2)
-#
-#         preview = content[start:end]
-#         if start > 0:
-#             preview = f"...{preview}"
-#         if end < len(content):
-#             preview = f"{preview}..."
-#
-#         return preview
-#     except:
-#         return None
 
 
 #  获取带高亮标记的内容预览
@@ -903,3 +898,54 @@ def format_file_size(size):
             return f"{size:.2f} {unit}"
         size /= 1024
     return f"{size:.2f} TB"
+
+
+# 2025年1月8日11:22:47
+# 添加修改文件可见性的接口
+@files_bp.route('/<int:file_id>/visibility', methods=['PUT'])
+@track_activity
+def update_file_visibility(file_id):
+    try:
+        # 获取当前用户
+        current_user_id = get_employee_id()
+        current_user = User.query.get(current_user_id)
+        if not current_user:
+            return jsonify({'error': '未找到用户'}), 404
+
+        # 获取文件
+        file = ProjectFile.query.get_or_404(file_id)
+
+        # 验证权限(只有文件上传者或管理员可以修改)
+        if file.upload_user_id != current_user_id and current_user.role != 1:
+            return jsonify({'error': '没有权限修改此文件'}), 403
+
+        # 获取请求数据
+        data = request.get_json()
+        is_public = data.get('is_public')
+
+        if is_public is None:
+            return jsonify({'error': '缺少必要参数'}), 400
+
+        # 更新文件可见性
+        file.is_public = is_public
+        db.session.commit()
+
+        # 记录操作日志
+        activity_detail = f"{'设置文件为公开' if is_public else '设置文件为私有'}: {file.original_name}"
+        UserActivityLog.log_activity(
+            user_id=current_user_id,
+            action_type='update_file_visibility',
+            action_detail=activity_detail,
+            resource_type='file',
+            resource_id=file_id
+        )
+
+        return jsonify({
+            'message': '文件可见性更新成功',
+            'is_public': file.is_public
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"更新文件可见性失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500

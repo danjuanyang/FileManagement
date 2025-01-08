@@ -96,6 +96,7 @@ class ProjectFile(db.Model):
     upload_user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     upload_date = db.Column(db.DateTime, nullable=False, default=datetime.now)
     text_extracted = db.Column(db.Boolean, default=False)
+    is_public = db.Column(db.Boolean, default=False)  # 是否公开
 
     # 关联
     # upload_user = db.relationship('User', backref='uploaded_files')

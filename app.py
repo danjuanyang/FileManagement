@@ -17,6 +17,7 @@ from routes.filemanagement import files_bp
 from routes.leaders import leader_bp
 from routes.employees import employee_bp
 from routes.projectplan import projectplan_bp
+from routes.training import training_bp
 from utils.activity_tracking import create_user_session, log_user_activity, track_activity
 from utils.network_utils import get_real_ip
 
@@ -30,6 +31,10 @@ app.register_blueprint(files_bp, url_prefix='/api/files')
 app.register_blueprint(announcement_bp, url_prefix='/api/announcements')
 
 app.register_blueprint(admin_bp, url_prefix='/api/admin')
+
+app.register_blueprint(training_bp, url_prefix='/api/training')
+
+
 # 用户登录接口
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -119,8 +124,6 @@ def logout():
 
     except Exception as e:
         return jsonify({'message': str(e)}), 401
-
-
 
 
 # 注册

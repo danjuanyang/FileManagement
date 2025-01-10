@@ -394,3 +394,55 @@ class AnnouncementReadStatus(db.Model):
     __table_args__ = (
         db.UniqueConstraint('announcement_id', 'user_id', name='_announcement_user_uc'),
     )
+
+
+
+# -----------------------------------------------------------------------------------------
+
+class Training(db.Model):
+    __tablename__ = 'trainings'
+
+    id = db.Column(db.Integer, primary_key=True)    # 训练ID
+    trainer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)   # 训练师ID
+    training_month = db.Column(db.String(7), nullable=False)  # 格式: "2024-01"
+    title = db.Column(db.String(100), nullable=False)   # 训练标题
+    description = db.Column(db.Text)    # 训练描述
+    status = db.Column(db.String(20), nullable=False)  # pending, completed
+    material_path = db.Column(db.String(255))   # 训练材料文件路径
+    upload_time = db.Column(db.DateTime)
+    create_time = db.Column(db.DateTime, default=datetime.now)
+    update_time = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    # 关系
+    trainer = db.relationship('User', backref='trainings')
+    comments = db.relationship('Comment', backref='training', lazy='dynamic')
+
+
+# 评论表
+class Comment(db.Model):
+    __tablename__ = 'comments'
+
+    id = db.Column(db.Integer, primary_key=True)
+    training_id = db.Column(db.Integer, db.ForeignKey('trainings.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    create_time = db.Column(db.DateTime, default=datetime.now)
+    update_time = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    # 关系
+    user = db.relationship('User', backref='comments')
+    replies = db.relationship('Reply', backref='comment', lazy='dynamic')
+
+
+class Reply(db.Model):
+    __tablename__ = 'replies'
+
+    id = db.Column(db.Integer, primary_key=True)
+    comment_id = db.Column(db.Integer, db.ForeignKey('comments.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    create_time = db.Column(db.DateTime, default=datetime.now)
+    update_time = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    # 关系
+    user = db.relationship('User', backref='replies')

@@ -1,20 +1,17 @@
 import base64
-import io
 import re
 import subprocess
 import tempfile
 import urllib
 import os
-import base64
 import uuid
 
-from pdf2image import convert_from_path
-from PIL import Image
 import io
 from flask import Blueprint, request, jsonify, current_app, send_from_directory
 from datetime import datetime
 import os
 
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.utils import secure_filename
 from models import db, Training, Comment, Reply, User
@@ -22,6 +19,13 @@ from routes.employees import token_required
 from routes.filemanagement import python_dir
 from utils.activity_tracking import track_activity
 import urllib.parse
+
+import tempfile
+from pptx import Presentation
+import comtypes.client
+from PIL import Image, ImageDraw, ImageFont
+from pptx.enum.dml import MSO_THEME_COLOR_INDEX, MSO_FILL_TYPE
+from pptx.enum.dml import MSO_FILL
 
 # 创建蓝图
 training_bp = Blueprint('training', __name__)
@@ -33,6 +37,7 @@ UPLOAD_FOLDER = os.path.join(python_dir, 'uploads')  # 基础上传目录
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 
 def sanitize_filename(filename):
     """
@@ -48,6 +53,7 @@ def sanitize_filename(filename):
     # 如果文件名为空，返回默认名称
     return safe_name or 'unnamed'
 
+
 def get_safe_path_component(component):
     """
     安全地处理路径组件名称，保留中文字符
@@ -55,6 +61,7 @@ def get_safe_path_component(component):
     if not component:
         return 'unnamed'
     return sanitize_filename(component)
+
 
 def generate_unique_filename(directory, original_filename):
     """生成唯一的文件名，处理文件名冲突"""
@@ -68,6 +75,8 @@ def generate_unique_filename(directory, original_filename):
         counter += 1
 
     return new_filename
+
+
 def ensure_upload_folder():
     """确保上传目录存在"""
     folder_path = os.path.join(current_app.static_folder, UPLOAD_FOLDER)
@@ -259,9 +268,6 @@ def upload_training_material(current_user, training_id):
         }), 500
 
 
-
-
-
 # 获取培训列表
 @training_bp.route('/list', methods=['GET'])
 @token_required
@@ -444,197 +450,371 @@ def add_reply(comment_id):
             'message': f'服务器错误: {str(e)}'
         }), 500
 
+# 预览PPT
+@training_bp.route('/preview/<path:filename>')
+@token_required
+def preview_training_file(current_user, filename):
+    try:
+        # 解码文件名
+        filename = urllib.parse.unquote(filename)
 
-# 获取培训文件
-# @training_bp.route('/files/<path:filename>')
-# @token_required
-# def get_training_file(current_user, filename):
-#     try:
-#         return send_from_directory(
-#             os.path.join(current_app.static_folder, UPLOAD_FOLDER),
-#             filename,
-#             as_attachment=True
-#         )
-#     except Exception as e:
-#         return jsonify({
-#             'code': 404,
-#             'message': f'文件不存在: {str(e)}'
-#         }), 404
-#
-#
-# def convert_ppt_to_images(ppt_path):
-#     """将 PPT 转换为图片列表"""
-#     pdf_path = None
-#     try:
-#         # 检查源文件是否存在
-#         if not os.path.exists(ppt_path):
-#             raise FileNotFoundError(f"源文件不存在: {ppt_path}")
-#
-#         # 创建临时文件路径
-#         with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp_pdf:
-#             pdf_path = tmp_pdf.name
-#
-#         # 检查 LibreOffice 是否安装
-#         if os.name == 'nt':  # Windows 系统
-#             # 检查常见的 LibreOffice 安装路径
-#             libreoffice_paths = [
-#                 r"C:\Program Files\LibreOffice\program\soffice.exe",
-#                 r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
-#             ]
-#             libreoffice_exe = None
-#             for path in libreoffice_paths:
-#                 if os.path.exists(path):
-#                     libreoffice_exe = path
-#                     break
-#             if not libreoffice_exe:
-#                 raise Exception("未找到 LibreOffice，请确保已安装 LibreOffice")
-#
-#             convert_command = [
-#                 libreoffice_exe,
-#                 '--headless',
-#                 '--convert-to',
-#                 'pdf',
-#                 '--outdir',
-#                 os.path.dirname(pdf_path),
-#                 ppt_path
-#             ]
-#         else:  # Linux/Mac 系统
-#             convert_command = [
-#                 'libreoffice',
-#                 '--headless',
-#                 '--convert-to',
-#                 'pdf',
-#                 '--outdir',
-#                 os.path.dirname(pdf_path),
-#                 ppt_path
-#             ]
-#
-#         # 执行转换命令
-#         print(f"执行命令: {' '.join(convert_command)}")  # 添加日志
-#         process = subprocess.run(
-#             convert_command,
-#             stdout=subprocess.PIPE,
-#             stderr=subprocess.PIPE,
-#             timeout=60  # 增加超时时间
-#         )
-#
-#         if process.returncode != 0:
-#             error_message = process.stderr.decode()
-#             print(f"转换失败，错误信息: {error_message}")  # 添加日志
-#             raise Exception(f"PPT转PDF失败: {error_message}")
-#
-#         # 确保 PDF 文件存在
-#         if not os.path.exists(pdf_path):
-#             raise FileNotFoundError(f"PDF文件未生成: {pdf_path}")
-#
-#         # 将 PDF 转换为图片
-#         images = convert_from_path(
-#             pdf_path,
-#             dpi=200,
-#             fmt="jpeg",
-#             thread_count=2
-#         )
-#
-#         # 将图片转换为 base64 字符串列表
-#         image_data = []
-#         for i, img in enumerate(images):
-#             print(f"处理第 {i + 1}/{len(images)} 页")  # 添加日志
-#             # 调整图片大小以优化传输
-#             max_size = (1024, 768)
-#             img.thumbnail(max_size, Image.LANCZOS)
-#
-#             # 转换为 JPEG 并压缩
-#             img_byte_arr = io.BytesIO()
-#             img.save(img_byte_arr, format='JPEG', quality=85, optimize=True)
-#             img_byte_arr = img_byte_arr.getvalue()
-#
-#             # 转换为 base64
-#             image_data.append(base64.b64encode(img_byte_arr).decode())
-#
-#         return image_data
-#
-#     except FileNotFoundError as e:
-#         print(f"文件不存在错误: {str(e)}")
-#         raise
-#     except subprocess.TimeoutExpired:
-#         print("转换超时")
-#         raise Exception("PPT转换超时，请检查文件是否过大或系统资源是否充足")
-#     except Exception as e:
-#         print(f"转换过程出错: {str(e)}")
-#         raise
-#     finally:
-#         # 清理临时文件
-#         try:
-#             if pdf_path and os.path.exists(pdf_path):
-#                 os.remove(pdf_path)
-#                 print(f"临时PDF文件已删除: {pdf_path}")
-#         except Exception as e:
-#             print(f"清理临时文件失败: {str(e)}")
-#
-#
-# @training_bp.route('/preview/<path:filename>')
-# @token_required
-# def preview_training_file(current_user, filename):
-#     try:
-#         # 解码文件名
-#         filename = urllib.parse.unquote(filename)
-#         print(f"准备预览文件: {filename}")  # 添加日志
-#
-#         # 从数据库获取培训记录
-#         material_path = os.path.join('training', os.path.basename(filename))
-#         training = Training.query.filter_by(material_path=material_path).first()
-#         if not training:
-#             return jsonify({
-#                 'code': 404,
-#                 'message': '培训记录不存在'
-#             }), 404
-#
-#         # 构建完整的文件路径
-#         file_path = os.path.join(current_app.root_path, 'uploads', 'training', os.path.basename(filename))
-#         print(f"完整文件路径: {file_path}")  # 添加日志
-#
-#         if not os.path.exists(file_path):
-#             return jsonify({
-#                 'code': 404,
-#                 'message': f'文件不存在: {file_path}'
-#             }), 404
-#
-#         # 检查文件扩展名
-#         if not filename.lower().endswith(('.ppt', '.pptx')):
-#             return jsonify({
-#                 'code': 400,
-#                 'message': '不支持的文件格式，仅支持 PPT/PPTX'
-#             }), 400
-#
-#         print("开始转换PPT文件")  # 添加日志
-#         # 将 PPT 转换为图片列表
-#         image_data = convert_ppt_to_images(file_path)
-#
-#         if not image_data:
-#             raise Exception("转换后的图片数据为空")
-#
-#         print(f"成功转换 {len(image_data)} 页")  # 添加日志
-#         return jsonify({
-#             'code': 200,
-#             'data': {
-#                 'images': image_data,
-#                 'total_slides': len(image_data)
-#             }
-#         })
-#
-#     except FileNotFoundError as e:
-#         print(f"文件不存在错误: {str(e)}")
-#         return jsonify({
-#             'code': 404,
-#             'message': str(e)
-#         }), 404
-#     except Exception as e:
-#         print(f"预览生成错误: {str(e)}")
-#         return jsonify({
-#             'code': 500,
-#             'message': f'预览生成失败: {str(e)}'
-#         }), 500
+        # 构建完整的文件路径
+        file_path = os.path.join(current_app.root_path, 'uploads', 'training', os.path.basename(filename))
+
+        if not os.path.exists(file_path):
+            return jsonify({
+                'code': 404,
+                'message': '文件不存在'
+            }), 404
+
+        # 使用纯Python处理器处理PPT
+        handler = PurePPTHandler()
+        result = handler.process_ppt(file_path)
+
+        if not result['success']:
+            return jsonify({
+                'code': 500,
+                'message': f'处理PPT失败: {result["error"]}'
+            }), 500
+
+        return jsonify({
+            'code': 200,
+            'data': {
+                'slides': result['slides'],
+                'total_slides': result['total_slides']
+            }
+        })
+
+    except Exception as e:
+        return jsonify({
+            'code': 500,
+            'message': f'预览生成失败: {str(e)}'
+        }), 500
 
 
+class PurePPTHandler:
+    @staticmethod
+    def get_system_font():
+        """获取系统中文字体"""
+        # 常见的中文字体路径
+        font_paths = [
+            # Windows 字体
+            "C:/Windows/Fonts/simhei.ttf",  # 黑体
+            "C:/Windows/Fonts/simsun.ttc",  # 宋体
+            "C:/Windows/Fonts/msyh.ttc",  # 微软雅黑
+            # Linux 字体
+            "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            # macOS 字体
+            "/System/Library/Fonts/PingFang.ttc",
+            # 回退选项
+            "",  # 空字符串会触发默认字体
+        ]
+
+        for font_path in font_paths:
+            try:
+                if os.path.exists(font_path):
+                    return ImageFont.truetype(font_path, 24)
+            except Exception:
+                continue
+
+        return ImageFont.load_default()
+
+    @staticmethod
+    def extract_ppt_content(ppt_path):
+        """
+        提取PPT内容，将每页转换为简单的文本和形状表示
+        """
+        print(f"Processing PPT file: {ppt_path}")
+        prs = Presentation(ppt_path)
+        slides_data = []
+
+        for i, slide in enumerate(prs.slides):
+            print(f"Processing slide {i + 1}")
+            slide_data = {
+                'shapes': [],
+                'texts': [],
+                'background_color': '#FFFFFF'  # 默认白色背景
+            }
+
+            # 提取背景（安全处理）
+            try:
+                background = slide.background
+                if hasattr(background, 'fill') and background.fill:
+                    fill_type = getattr(background.fill, 'type', None)
+                    if fill_type is not None and fill_type != MSO_FILL_TYPE.NONE:
+                        if hasattr(background.fill, 'fore_color') and background.fill.fore_color:
+                            rgb = background.fill.fore_color.rgb
+                            if rgb:
+                                slide_data['background_color'] = f'#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}'
+            except Exception as e:
+                print(f"背景提取警告（非严重）： {e}")
+                # 继续使用默认白色背景
+
+            # 提取形状和文本
+            for shape in slide.shapes:
+                try:
+                    # 处理文本
+                    if hasattr(shape, "text") and shape.text.strip():
+                        # 获取文本框的填充颜色
+                        text_color = '#000000'  # 默认黑色
+                        try:
+                            if shape.fill.type != MSO_FILL.NONE:
+                                if hasattr(shape.fill, 'fore_color') and shape.fill.fore_color:
+                                    rgb = shape.fill.fore_color.rgb
+                                    if rgb:
+                                        text_color = f'#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}'
+                        except Exception:
+                            pass
+
+                        slide_data['texts'].append({
+                            'text': shape.text,
+                            'left': shape.left / 9144000 * 1024,  # 转换EMU到像素
+                            'top': shape.top / 6858000 * 768,
+                            'width': shape.width / 9144000 * 1024,
+                            'height': shape.height / 6858000 * 768,
+                            'color': text_color
+                        })
+
+                    # 处理图片
+                    if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                        try:
+                            print(f"Found picture shape at position ({shape.left}, {shape.top})")
+                            # 直接获取图片数据
+                            image = shape.image
+                            if not hasattr(image, 'blob'):
+                                print("Image has no blob attribute")
+                                continue
+
+                            image_bytes = image.blob
+                            if not image_bytes:
+                                print("Image blob is empty")
+                                continue
+
+                            print(f"Image format: {getattr(image, 'content_type', 'unknown')}")
+                            print(f"Image size: {len(image_bytes)} bytes")
+
+                            # 使用PIL验证图片数据
+                            try:
+                                test_image = Image.open(io.BytesIO(image_bytes))
+                                print(f"Image mode: {test_image.mode}, size: {test_image.size}")
+                            except Exception as img_err:
+                                print(f"Invalid image data: {img_err}")
+                                continue
+
+                            # 转换为base64
+                            img_base64 = base64.b64encode(image_bytes).decode()
+
+                            # 计算位置（添加偏移修正）
+                            left = max(0, shape.left / 9144000 * 1024)
+                            top = max(0, shape.top / 6858000 * 768)
+                            width = min(1024, shape.width / 9144000 * 1024)
+                            height = min(768, shape.height / 6858000 * 768)
+
+                            slide_data['shapes'].append({
+                                'type': 'image',
+                                'data': img_base64,
+                                'left': left,
+                                'top': top,
+                                'width': width,
+                                'height': height,
+                                'format': getattr(image, 'content_type', 'png')
+                            })
+                            print(f"Successfully added image: {left:.0f}x{top:.0f} @ {width:.0f}x{height:.0f}")
+                        except Exception as e:
+                            print(f"Image processing error: {str(e)}")
+                            import traceback
+                            print(traceback.format_exc())
+                except Exception as e:
+                    print(f"Shape processing error: {e}")
+
+            slides_data.append(slide_data)
+
+        return slides_data
+
+    @staticmethod
+    def render_slide_preview(slide_data, width=1024, height=768):
+        """
+        将幻灯片数据渲染为简单的预览图
+        """
+        try:
+            # 创建带背景色的图片
+            background_color = slide_data.get('background_color', '#FFFFFF')
+            image = Image.new('RGB', (width, height), background_color)
+            draw = ImageDraw.Draw(image)
+
+            # 获取系统中文字体
+            font = PurePPTHandler.get_system_font()
+
+            # 渲染形状
+            print(f"Processing {len(slide_data['shapes'])} shapes")
+            for i, shape in enumerate(slide_data['shapes']):
+                if shape['type'] == 'image':
+                    try:
+                        print(f"Rendering image {i + 1}")
+                        # 解码base64
+                        img_data = base64.b64decode(shape['data'])
+                        print(f"Decoded image size: {len(img_data)} bytes")
+
+                        # 打开图片
+                        shape_image = Image.open(io.BytesIO(img_data))
+                        print(f"Original image mode: {shape_image.mode}, size: {shape_image.size}")
+
+                        # 确保图片大小合理
+                        target_width = max(1, min(int(shape['width']), width))
+                        target_height = max(1, min(int(shape['height']), height))
+                        print(f"Resizing to: {target_width}x{target_height}")
+
+                        # 调整图片大小
+                        shape_image = shape_image.resize(
+                            (target_width, target_height),
+                            Image.Resampling.LANCZOS
+                        )
+
+                        # 确保图片模式正确
+                        if shape_image.mode in ['RGBA', 'LA']:
+                            # 创建白色背景
+                            background = Image.new('RGBA', shape_image.size, 'white')
+                            shape_image = Image.alpha_composite(background.convert('RGBA'),
+                                                                shape_image.convert('RGBA'))
+
+                        # 转换为RGB模式
+                        if shape_image.mode != 'RGB':
+                            shape_image = shape_image.convert('RGB')
+
+                        # 计算粘贴位置
+                        paste_x = max(0, min(int(shape['left']), width - target_width))
+                        paste_y = max(0, min(int(shape['top']), height - target_height))
+                        print(f"Pasting at position: ({paste_x}, {paste_y})")
+
+                        # 粘贴图片
+                        try:
+                            image.paste(
+                                shape_image,
+                                (paste_x, paste_y)
+                            )
+                            print("Successfully pasted image")
+                        except Exception as paste_err:
+                            print(f"Error pasting image: {paste_err}")
+
+                    except Exception as e:
+                        print(f"Error rendering image shape: {str(e)}")
+                        import traceback
+                        print(traceback.format_exc())
+
+            # 渲染文本
+            for text_item in slide_data['texts']:
+                try:
+                    x = int(text_item['left'])
+                    y = int(text_item['top'])
+
+                    # 文本换行处理
+                    max_width = int(text_item['width'])
+                    text = text_item['text']
+                    color = text_item.get('color', '#000000')
+
+                    # 简单的文本换行
+                    words = text.split()
+                    lines = []
+                    current_line = []
+
+                    for word in words:
+                        current_line.append(word)
+                        test_line = ' '.join(current_line)
+                        bbox = draw.textbbox((0, 0), test_line, font=font)
+                        if bbox[2] - bbox[0] > max_width:
+                            current_line.pop()
+                            lines.append(' '.join(current_line))
+                            current_line = [word]
+
+                    lines.append(' '.join(current_line))
+
+                    # 绘制每行文本
+                    line_height = font.size + 4
+                    for i, line in enumerate(lines):
+                        draw.text(
+                            (x, y + i * line_height),
+                            line,
+                            fill=color,
+                            font=font
+                        )
+
+                except Exception as e:
+                    print(f"Error rendering text: {e}")
+
+            # 保存为PNG
+            buffer = io.BytesIO()
+            image.save(buffer, format='PNG', optimize=True)
+            buffer.seek(0)
+            return base64.b64encode(buffer.getvalue()).decode()
+
+        except Exception as e:
+            print(f"Error in render_slide_preview: {e}")
+            return None
+
+    @staticmethod
+    def process_ppt(ppt_path):
+        """
+        处理PPT文件并返回所有幻灯片的预览
+        """
+        try:
+            print(f"Starting to process PPT: {ppt_path}")
+            slides_data = PurePPTHandler.extract_ppt_content(ppt_path)
+
+            previews = []
+            for i, slide_data in enumerate(slides_data):
+                print(f"Rendering slide {i + 1}")
+                preview = PurePPTHandler.render_slide_preview(slide_data)
+                if preview:
+                    previews.append({
+                        'image': preview,
+                        'texts': slide_data['texts'],
+                        'shapes': [s for s in slide_data['shapes'] if s['type'] == 'image']
+                    })
+                else:
+                    print(f"Failed to render slide {i + 1}")
+
+            return {
+                'success': True,
+                'slides': previews,
+                'total_slides': len(previews)
+            }
+
+        except Exception as e:
+            print(f"Error in process_ppt: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
 
 
+# 下载
+@training_bp.route('/download/<path:filename>')
+@token_required
+def download_training_file(current_user, filename):
+    try:
+        # 解码文件名
+        filename = urllib.parse.unquote(filename)
+
+        # 构建完整的文件路径
+        file_path = os.path.join(current_app.root_path, 'uploads', 'training', os.path.basename(filename))
+
+        if not os.path.exists(file_path):
+            return jsonify({
+                'code': 404,
+                'message': '文件不存在'
+            }), 404
+
+        # 获取文件的原始名称
+        directory = os.path.dirname(file_path)
+        return send_from_directory(
+            directory,
+            os.path.basename(file_path),
+            as_attachment=True
+        )
+
+    except Exception as e:
+        return jsonify({
+            'code': 500,
+            'message': f'下载失败: {str(e)}'
+        }), 500

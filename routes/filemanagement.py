@@ -981,21 +981,26 @@ def update_file_visibility(file_id):
         return jsonify({'error': str(e)}), 500
 
 
-# 2025年1月13日16:51:42
+# 2025年1月15日17:11:19
+# 已解决！！
 
 def setup_fonts():
     """设置字体"""
     try:
-        # 注册字体
-        font_path = os.path.join(os.path.dirname(__file__), 'fonts')  # 确保fonts目录存在
+        # 获取字体文件路径
+        font_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'fonts', 'simsun.ttf')
 
-        # 注册宋体
-        pdfmetrics.registerFont(TTFont('SimSun', os.path.join(font_path, 'SimSun.ttf')))
-        pdfmetrics.registerFont(TTFont('SimSun-Bold', os.path.join(font_path, 'SimSunb.ttf')))
+        # 注册基本字体
+        pdfmetrics.registerFont(TTFont('SimSun', font_path))
 
-        # 注册字体家族
-        registerFontFamily('SimSun', normal='SimSun', bold='SimSun-Bold')
-
+        # 注册字体变体
+        pdfmetrics.registerFontFamily(
+            'SimSun',
+            normal='SimSun',
+            bold='SimSun',  # 使用同一个字体文件
+            italic='SimSun',  # 使用同一个字体文件
+            boldItalic='SimSun'  # 使用同一个字体文件
+        )
         return True
     except Exception as e:
         print(f"字体设置失败: {str(e)}")
@@ -1023,29 +1028,54 @@ def create_pdf_style():
     """创建PDF样式"""
     styles = getSampleStyleSheet()
 
-    # 创建基础样式
+    # 确保使用已注册的字体
+    default_font = 'SimSun'
+
+    # 基础样式
     basic_style = ParagraphStyle(
         'BasicStyle',
         parent=styles['Normal'],
-        fontName='SimSun',
+        fontName=default_font,
         fontSize=12,
         leading=14,
-        wordWrap='CJK',  # 支持中文换行
         allowWidows=0,
         allowOrphans=0
     )
 
-    # 创建标题样式
+    # 标题样式
     title_style = ParagraphStyle(
         'TitleStyle',
         parent=basic_style,
+        fontName=default_font,
         fontSize=16,
         leading=20,
         spaceAfter=30,
-        alignment=1  # 居中
+        alignment=1
     )
 
-    return basic_style, title_style
+    # 居中样式
+    center_style = ParagraphStyle(
+        'CenterStyle',
+        parent=basic_style,
+        fontName=default_font,
+        alignment=1
+    )
+
+    # 右对齐样式
+    right_style = ParagraphStyle(
+        'RightStyle',
+        parent=basic_style,
+        fontName=default_font,
+        alignment=2
+    )
+
+    return {
+        'basic': basic_style,
+        'title': title_style,
+        'center': center_style,
+        'right': right_style
+    }
+
 
 def extract_prefix_number(filename):
     """从文件名中提取前缀数字"""
@@ -1063,6 +1093,10 @@ def sort_files_by_prefix(files):
 def convert_word_to_pdf(input_file, output_file):
     """将Word文档转换为PDF"""
     try:
+        # 确保字体已设置
+        if not setup_fonts():
+            raise Exception("字体设置失败")
+
         doc = Document(input_file)
         pdf = SimpleDocTemplate(
             output_file,
@@ -1073,22 +1107,29 @@ def convert_word_to_pdf(input_file, output_file):
             bottomMargin=72
         )
 
-        styles = getSampleStyleSheet()
-        # 创建支持中文的样式
-        chinese_style = ParagraphStyle(
-            'ChineseStyle',
-            parent=styles['Normal'],
-            fontName='SimSun',
-            fontSize=12,
-            leading=14
-        )
-
+        # 获取样式
+        styles = create_pdf_style()
         story = []
+
         for paragraph in doc.paragraphs:
-            if paragraph.text.strip():
-                p = Paragraph(paragraph.text, chinese_style)
-                story.append(p)
-                story.append(Spacer(1, 12))
+            text = paragraph.text.strip()
+            if not text:
+                continue
+
+            # 根据段落样式选择对应的PDF样式
+            if paragraph.style.name.startswith('Heading'):
+                p = Paragraph(text, styles['title'])
+            else:
+                # 根据对齐方式选择样式
+                if paragraph.alignment == WD_PARAGRAPH_ALIGNMENT.CENTER:
+                    p = Paragraph(text, styles['center'])
+                elif paragraph.alignment == WD_PARAGRAPH_ALIGNMENT.RIGHT:
+                    p = Paragraph(text, styles['right'])
+                else:
+                    p = Paragraph(text, styles['basic'])
+
+            story.append(p)
+            story.append(Spacer(1, 12))
 
         pdf.build(story)
         return True
@@ -1097,9 +1138,14 @@ def convert_word_to_pdf(input_file, output_file):
         return False
 
 
+
 def convert_excel_to_pdf(input_file, output_file):
     """将Excel文档转换为PDF"""
     try:
+        # 确保字体已设置
+        if not setup_fonts():
+            raise Exception("字体设置失败")
+
         wb = load_workbook(input_file)
         pdf = SimpleDocTemplate(
             output_file,
@@ -1111,13 +1157,17 @@ def convert_excel_to_pdf(input_file, output_file):
         )
 
         elements = []
-        styles = getSampleStyleSheet()
+        styles = create_pdf_style()
 
         for sheet in wb.worksheets:
+            # 添加工作表标题
+            elements.append(Paragraph(sheet.title, styles['title']))
+            elements.append(Spacer(1, 20))
+
             # 创建表格数据
             data = []
             for row in sheet.rows:
-                data.append([cell.value if cell.value is not None else '' for cell in row])
+                data.append([str(cell.value) if cell.value is not None else '' for cell in row])
 
             if data:
                 # 创建表格
@@ -1126,9 +1176,11 @@ def convert_excel_to_pdf(input_file, output_file):
                     colWidths=[1.5 * inch] * len(data[0]),
                     style=[
                         ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                        ('FONTNAME', (0, 0), (-1, -1), 'SimSun'),
                         ('FONTSIZE', (0, 0), (-1, -1), 10),
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.grey90),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
                     ]
                 )
                 elements.append(table)
@@ -1199,6 +1251,7 @@ def merge_project_files_to_pdf(project_id):
     """将项目文件按任务顺序合并为PDF"""
     temp_dir = None
     try:
+        # 不再检查字体设置
         # 获取项目信息
         project = Project.query.get(project_id)
         if not project:
@@ -1246,14 +1299,15 @@ def merge_project_files_to_pdf(project_id):
                         continue
 
                     try:
-                        if ext == '.pdf':
-                            task_pdf_merger.append(input_path)
-                            task_has_files = True
-                            processed_files.append(file.original_name)
-                            continue
-
                         temp_pdf = os.path.join(temp_dir, f"{file.id}.pdf")
-                        if convert_to_pdf(input_path, temp_pdf):
+
+                        if ext == '.pdf':
+                            shutil.copy2(input_path, temp_pdf)
+                            success = True
+                        else:
+                            success = convert_to_pdf(input_path, temp_pdf)
+
+                        if success:
                             task_pdf_merger.append(temp_pdf)
                             task_has_files = True
                             processed_files.append(file.original_name)

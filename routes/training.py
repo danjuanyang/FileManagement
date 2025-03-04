@@ -22,10 +22,9 @@ import urllib.parse
 
 import tempfile
 from pptx import Presentation
-import comtypes.client
 from PIL import Image, ImageDraw, ImageFont
 from pptx.enum.dml import MSO_THEME_COLOR_INDEX, MSO_FILL_TYPE
-from pptx.enum.dml import MSO_FILL
+# from pptx.enum.dml import MSO_FILL
 
 # 创建蓝图
 training_bp = Blueprint('training', __name__)

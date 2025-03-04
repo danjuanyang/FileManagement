@@ -20,6 +20,7 @@ from routes.projectplan import projectplan_bp
 from routes.training import training_bp
 from utils.activity_tracking import create_user_session, log_user_activity, track_activity
 from utils.network_utils import get_real_ip
+from routes.file_merge_router import merge_bp  # 导入文件合并蓝图
 
 app.register_blueprint(leader_bp, url_prefix='/api/leader')
 app.register_blueprint(employee_bp, url_prefix='/api/employee')
@@ -27,7 +28,7 @@ app.register_blueprint(employee_bp, url_prefix='/api/employee')
 app.register_blueprint(projectplan_bp, url_prefix='/api/projectplan')
 
 app.register_blueprint(files_bp, url_prefix='/api/files')
-
+app.register_blueprint(merge_bp, url_prefix='/api/files')
 app.register_blueprint(announcement_bp, url_prefix='/api/announcements')
 
 app.register_blueprint(admin_bp, url_prefix='/api/admin')

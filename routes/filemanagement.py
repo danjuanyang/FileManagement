@@ -27,6 +27,7 @@ from auth import get_employee_id
 from utils.activity_tracking import track_activity
 from docx import Document
 
+from reportlab.lib.pagesizes import A4, landscape
 # 搜索
 
 from .file_indexer import update_file_index, get_mime_type, create_file_index
@@ -43,9 +44,9 @@ from docx.oxml.ns import qn
 
 import tempfile
 from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.pdfbase import pdfmetrics
@@ -323,99 +324,6 @@ def upload_task_file(project_id, stage_id, task_id):
         return jsonify({'error': f'数据库操作失败: {str(e)}'}), 500
 
     return jsonify({'message': '文件上传成功', 'file_id': project_file.id})
-
-
-# 搜索文件
-# contentPreview 字段只有在满足两个条件时才会被添加到结果中：
-# 1文件必须有关联的内容（即 file.content 不为 None）
-# 2搜索关键词必须在文件内容中找到
-
-# 搜索
-# @files_bp.route('/search', methods=['GET'])
-# @track_activity
-# def search_files():
-#     try:
-#         search_query = request.args.get('query', '').strip()
-#         if not search_query:
-#             return jsonify({'error': 'Search query is required'}), 400
-#
-#         base_query = ProjectFile.query.options(
-#             joinedload(ProjectFile.project),
-#             joinedload(ProjectFile.stage),
-#             joinedload(ProjectFile.task),
-#             joinedload(ProjectFile.upload_user),
-#             joinedload(ProjectFile.content)
-#         )
-#
-#         search_conditions = [
-#             ProjectFile.original_name.ilike(f'%{search_query}%'),
-#             ProjectFile.file_name.ilike(f'%{search_query}%'),
-#             ProjectFile.file_type.ilike(f'%{search_query}%'),
-#             ProjectFile.file_path.ilike(f'%{search_query}%'),
-#             Project.name.ilike(f'%{search_query}%'),
-#             ProjectStage.name.ilike(f'%{search_query}%'),
-#             StageTask.name.ilike(f'%{search_query}%'),
-#             User.username.ilike(f'%{search_query}%'),
-#             FileContent.content.ilike(f'%{search_query}%')
-#         ]
-#
-#         search_results = base_query \
-#             .join(Project) \
-#             .join(ProjectStage) \
-#             .join(StageTask) \
-#             .join(User, ProjectFile.upload_user_id == User.id) \
-#             .outerjoin(FileContent) \
-#             .filter(or_(*search_conditions)) \
-#             .all()
-#
-#         results = []
-#         for file in search_results:
-#             try:
-#                 file_path = os.path.join(current_app.root_path, file.file_path)
-#                 file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
-#
-#                 result = {
-#                     'id': file.id,
-#                     'fileName': file.file_name,
-#                     'originalName': highlight_text(file.original_name, search_query),
-#                     'fileType': file.file_type,
-#                     'fileSize': file_size,
-#                     'uploadTime': file.upload_date.isoformat(),
-#                     'uploader': highlight_text(file.upload_user.username, search_query),
-#                     'projectName': highlight_text(file.project.name if file.project else None, search_query),
-#                     'stageName': highlight_text(file.stage.name if file.stage else None, search_query),
-#                     'taskName': highlight_text(file.task.name if file.task else None, search_query),
-#                 }
-#
-#                 # 添加内容预览字段，并处理高亮
-#                 result['contentPreview'] = None
-#                 if file.content:
-#                     preview = get_content_preview(
-#                         file.content.content,
-#                         search_query,
-#                         context_length=150
-#                     )
-#                     if preview:
-#                         result['contentPreview'] = preview
-#                     else:
-#                         result['contentPreview'] = "无匹配内容"
-#                 else:
-#                     result['contentPreview'] = "未提取内容"
-#
-#                 results.append(result)
-#             except Exception as e:
-#                 print(f"处理文件 {file.id} 时出错: {str(e)}")
-#                 continue
-#
-#         return jsonify({
-#             'results': results,
-#             'total': len(results)
-#         })
-#
-#     except Exception as e:
-#         print(f"搜索错误: {str(e)}")
-#         return jsonify({'error': str(e)}), 500
-
 
 
 
@@ -1090,331 +998,36 @@ def sort_files_by_prefix(files):
     return sorted(files, key=lambda x: extract_prefix_number(x.file_name))
 
 
-def convert_word_to_pdf(input_file, output_file):
-    """将Word文档转换为PDF"""
-    try:
-        # 确保字体已设置
-        if not setup_fonts():
-            raise Exception("字体设置失败")
+def should_use_landscape(data, font_name='SimSun', font_size=8):
+    """
+    判断是否应该使用横向布局
+    通过计算内容宽度和竖向A4纸的可用宽度比较来决定
+    """
+    from reportlab.pdfbase.pdfmetrics import stringWidth
 
-        doc = Document(input_file)
-        pdf = SimpleDocTemplate(
-            output_file,
-            pagesize=A4,
-            rightMargin=72,
-            leftMargin=72,
-            topMargin=72,
-            bottomMargin=72
-        )
-
-        # 获取样式
-        styles = create_pdf_style()
-        story = []
-
-        for paragraph in doc.paragraphs:
-            text = paragraph.text.strip()
-            if not text:
-                continue
-
-            # 根据段落样式选择对应的PDF样式
-            if paragraph.style.name.startswith('Heading'):
-                p = Paragraph(text, styles['title'])
-            else:
-                # 根据对齐方式选择样式
-                if paragraph.alignment == WD_PARAGRAPH_ALIGNMENT.CENTER:
-                    p = Paragraph(text, styles['center'])
-                elif paragraph.alignment == WD_PARAGRAPH_ALIGNMENT.RIGHT:
-                    p = Paragraph(text, styles['right'])
-                else:
-                    p = Paragraph(text, styles['basic'])
-
-            story.append(p)
-            story.append(Spacer(1, 12))
-
-        pdf.build(story)
-        return True
-    except Exception as e:
-        print(f"转换Word文档失败: {str(e)}")
+    if not data or not data[0]:
         return False
 
+    # 计算所有列的最大内容宽度
+    max_col_widths = []
+    for row in data:
+        while len(max_col_widths) < len(row):
+            max_col_widths.append(0)
+        for i, cell in enumerate(row):
+            content_width = stringWidth(str(cell), font_name, font_size)
+            max_col_widths[i] = max(max_col_widths[i], content_width)
 
+    # 计算总需要的宽度（包括一些边距和padding）
+    total_required_width = sum(max_col_widths) + (len(max_col_widths) * 4)  # 4点的padding
 
-def convert_excel_to_pdf(input_file, output_file):
-    """将Excel文档转换为PDF"""
-    try:
-        # 确保字体已设置
-        if not setup_fonts():
-            raise Exception("字体设置失败")
+    # A4纸的宽度（portrait模式）减去左右边距
+    A4_PORTRAIT_WIDTH = A4[0] - 40  # 减去左右各20的边距
 
-        wb = load_workbook(input_file)
-        pdf = SimpleDocTemplate(
-            output_file,
-            pagesize=A4,
-            rightMargin=30,
-            leftMargin=30,
-            topMargin=30,
-            bottomMargin=30
-        )
+    # 如果需要的宽度超过竖向A4可用宽度的80%，建议使用横向
+    return total_required_width > (A4_PORTRAIT_WIDTH * 0.8)
 
-        elements = []
-        styles = create_pdf_style()
-
-        for sheet in wb.worksheets:
-            # 添加工作表标题
-            elements.append(Paragraph(sheet.title, styles['title']))
-            elements.append(Spacer(1, 20))
-
-            # 创建表格数据
-            data = []
-            for row in sheet.rows:
-                data.append([str(cell.value) if cell.value is not None else '' for cell in row])
-
-            if data:
-                # 创建表格
-                table = Table(
-                    data,
-                    colWidths=[1.5 * inch] * len(data[0]),
-                    style=[
-                        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                        ('FONTNAME', (0, 0), (-1, -1), 'SimSun'),
-                        ('FONTSIZE', (0, 0), (-1, -1), 10),
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.grey90),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
-                    ]
-                )
-                elements.append(table)
-                elements.append(Spacer(1, 20))
-
-        pdf.build(elements)
-        return True
-    except Exception as e:
-        print(f"转换Excel文档失败: {str(e)}")
-        return False
-
-
-def convert_ppt_to_pdf(input_file, output_file):
-    """将PPT文档转换为PDF"""
-    try:
-        prs = Presentation(input_file)
-        c = canvas.Canvas(output_file, pagesize=A4)
-        width, height = A4
-
-        for slide in prs.slides:
-            # 处理每个形状
-            y = height - 50  # 起始位置
-
-            for shape in slide.shapes:
-                if hasattr(shape, "text"):
-                    # 分行处理文本
-                    for line in shape.text.split('\n'):
-                        if line.strip():
-                            # 如果文本太长需要换行
-                            while len(line) > 80:  # 假设每行80个字符
-                                c.drawString(50, y, line[:80])
-                                line = line[80:]
-                                y -= 20
-                            c.drawString(50, y, line)
-                            y -= 20
-
-                if y < 50:  # 如果页面空间不足，创建新页面
-                    c.showPage()
-                    y = height - 50
-
-            c.showPage()  # 每个幻灯片结束后创建新页面
-
-        c.save()
-        return True
-    except Exception as e:
-        print(f"转换PPT文档失败: {str(e)}")
-        return False
-
-
-def convert_to_pdf(input_file, output_file):
-    """将Office文件转换为PDF"""
-    ext = os.path.splitext(input_file)[1].lower()
-
-    try:
-        if ext in ['.doc', '.docx']:
-            return convert_word_to_pdf(input_file, output_file)
-        elif ext in ['.xls', '.xlsx']:
-            return convert_excel_to_pdf(input_file, output_file)
-        elif ext in ['.ppt', '.pptx']:
-            return convert_ppt_to_pdf(input_file, output_file)
-        return False
-    except Exception as e:
-        print(f"转换文件失败 {input_file}: {str(e)}")
-        return False
-
-
-def merge_project_files_to_pdf(project_id):
-    """将项目文件按任务顺序合并为PDF"""
-    temp_dir = None
-    try:
-        # 不再检查字体设置
-        # 获取项目信息
-        project = Project.query.get(project_id)
-        if not project:
-            return None, "项目不存在"
-
-        # 创建临时目录
-        temp_dir = tempfile.mkdtemp()
-        os.makedirs(temp_dir, exist_ok=True)
-
-        final_pdf_merger = PdfMerger()
-        has_files = False
-        processed_files = []
-        skipped_files = []
-
-        # 处理项目文件
-        for stage in project.stages:
-            for task in stage.tasks:
-                files = ProjectFile.query.filter_by(
-                    project_id=project_id,
-                    stage_id=stage.id,
-                    task_id=task.id
-                ).all()
-
-                sorted_files = sort_files_by_prefix(files)
-                task_pdf_merger = PdfMerger()
-                task_has_files = False
-
-                for file in sorted_files:
-                    ext = os.path.splitext(file.file_name)[1].lower()
-                    supported_types = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.pdf']
-
-                    if ext not in supported_types:
-                        skipped_files.append({
-                            'name': file.original_name,
-                            'reason': '不支持的文件类型'
-                        })
-                        continue
-
-                    input_path = os.path.join(current_app.root_path, file.file_path)
-                    if not os.path.exists(input_path):
-                        skipped_files.append({
-                            'name': file.original_name,
-                            'reason': '文件不存在'
-                        })
-                        continue
-
-                    try:
-                        temp_pdf = os.path.join(temp_dir, f"{file.id}.pdf")
-
-                        if ext == '.pdf':
-                            shutil.copy2(input_path, temp_pdf)
-                            success = True
-                        else:
-                            success = convert_to_pdf(input_path, temp_pdf)
-
-                        if success:
-                            task_pdf_merger.append(temp_pdf)
-                            task_has_files = True
-                            processed_files.append(file.original_name)
-                        else:
-                            skipped_files.append({
-                                'name': file.original_name,
-                                'reason': '转换失败'
-                            })
-                    except Exception as e:
-                        skipped_files.append({
-                            'name': file.original_name,
-                            'reason': f'处理错误: {str(e)}'
-                        })
-
-                if task_has_files:
-                    task_pdf_path = os.path.join(temp_dir, f"task_{task.id}_merged.pdf")
-                    task_pdf_merger.write(task_pdf_path)
-                    task_pdf_merger.close()
-                    final_pdf_merger.append(task_pdf_path)
-                    has_files = True
-
-        if not has_files:
-            return None, "没有可合并的文件"
-
-        # 生成最终PDF
-        output_filename = f"{project.name}_merged.pdf"
-        output_path = os.path.join(temp_dir, output_filename)
-        final_pdf_merger.write(output_path)
-        final_pdf_merger.close()
-
-        # 复制到临时文件并返回
-        temp_output = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
-        shutil.copy2(output_path, temp_output.name)
-
-        return temp_output.name, None
-
-    except Exception as e:
-        return None, str(e)
-    finally:
-        if temp_dir and os.path.exists(temp_dir):
-            try:
-                shutil.rmtree(temp_dir)
-            except Exception as e:
-                print(f"清理临时文件失败: {str(e)}")
 
 
 # Flask路由部分保持不变
 merge_progress = {}
 
-
-@files_bp.route('/project/<int:project_id>/merge-pdf/progress')
-def merge_progress_stream(project_id):
-    def generate():
-        while True:
-            progress = merge_progress.get(project_id, 0)
-            yield f"data: {{'progress': {progress}}}\n\n"
-            if progress >= 100:
-                break
-            time.sleep(1)
-
-    return Response(
-        stream_with_context(generate()),
-        mimetype='text/event-stream'
-    )
-
-
-@files_bp.route('/project/<int:project_id>/merge-pdf', methods=['POST'])
-@track_activity
-def merge_project_pdf(project_id):
-    try:
-        employee_id = get_employee_id()
-        user = User.query.get(employee_id)
-        if not user:
-            return jsonify({'error': '未找到用户'}), 404
-
-        project = Project.query.get_or_404(project_id)
-        if not project:
-            return jsonify({'error': '项目不存在'}), 404
-
-        merge_progress[project_id] = 0
-        output_path, error = merge_project_files_to_pdf(project_id)
-
-        if error:
-            return jsonify({'error': error}), 400
-
-        if not output_path or not os.path.exists(output_path):
-            return jsonify({'error': '合并失败：无法生成PDF文件'}), 500
-
-        response = send_file(
-            output_path,
-            as_attachment=True,
-            download_name=f"{project.name}_merged.pdf",
-            mimetype='application/pdf'
-        )
-
-        @response.call_on_close
-        def cleanup():
-            try:
-                if output_path and os.path.exists(output_path):
-                    os.unlink(output_path)
-            except Exception as e:
-                print(f"清理临时文件失败: {str(e)}")
-
-        return response
-
-    except Exception as e:
-        return jsonify({'error': f"发生错误: {str(e)}"}), 500
-    finally:
-        if project_id in merge_progress:
-            del merge_progress[project_id]

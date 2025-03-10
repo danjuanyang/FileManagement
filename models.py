@@ -446,3 +446,93 @@ class Reply(db.Model):
 
     # 关系
     user = db.relationship('User', backref='replies')
+
+
+    # -----------------------------------------------------------------------------------------
+
+# AI API 表
+class AIApi(db.Model):
+    __tablename__ = 'ai_api'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    ai_model = db.Column(db.String(50))
+    api_key = db.Column(db.String(255), nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    # 关系
+    user = db.relationship('User', backref=db.backref('ai_apis', lazy='dynamic', passive_deletes=True))
+
+# AI 会话表
+class AIConversation(db.Model):
+    __tablename__ = 'ai_conversations'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    title = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+    is_archived = db.Column(db.Boolean, default=False)
+
+    # 关系
+    user = db.relationship('User', backref=db.backref('ai_conversations', lazy='dynamic', passive_deletes=True))
+    messages = db.relationship('AIMessage', backref='conversation', lazy='dynamic', cascade='all, delete-orphan')
+    tags = db.relationship('AITag', secondary='ai_conversation_tags',
+                           backref=db.backref('conversations', lazy='dynamic'))
+
+# AI 消息表
+class AIMessage(db.Model):
+    __tablename__ = 'ai_messages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    conversation_id = db.Column(db.Integer, db.ForeignKey('ai_conversations.id', ondelete='CASCADE'),
+                                nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    role = db.Column(db.String(10), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    tokens_used = db.Column(db.Integer, default=0)
+    model_version = db.Column(db.String(50))
+
+    # 反馈关系
+    feedback = db.relationship('AIMessageFeedback', backref='message', lazy='dynamic', cascade='all, delete-orphan')
+
+    # 验证 role 字段的值
+    __table_args__ = (
+        db.CheckConstraint("role IN ('user', 'assistant', 'system')", name='check_role'),
+    )
+
+# AI 标签表
+class AITag(db.Model):
+    __tablename__ = 'ai_tags'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)
+
+# AI 会话-标签关联表
+class AIConversationTag(db.Model):
+    __tablename__ = 'ai_conversation_tags'
+
+    conversation_id = db.Column(db.Integer, db.ForeignKey('ai_conversations.id', ondelete='CASCADE'),
+                                primary_key=True)
+    tag_id = db.Column(db.Integer, db.ForeignKey('ai_tags.id', ondelete='CASCADE'), primary_key=True)
+
+# AI 消息反馈表
+class AIMessageFeedback(db.Model):
+    __tablename__ = 'ai_message_feedback'
+
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, db.ForeignKey('ai_messages.id', ondelete='CASCADE'), nullable=False)
+    rating = db.Column(db.Integer, nullable=False)  # 1 表示点赞，-1 表示踩
+    feedback_text = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    # 验证 rating 字段的值
+    __table_args__ = (
+        db.CheckConstraint("rating IN (1, -1)", name='check_rating'),
+    )
+
+# 创建索引
+db.Index('idx_ai_messages_conversation_id', AIMessage.conversation_id)
+db.Index('idx_ai_conversations_user_id', AIConversation.user_id)
+db.Index('idx_ai_conversations_updated_at', AIConversation.updated_at)
+db.Index('idx_ai_message_feedback_message_id', AIMessageFeedback.message_id)

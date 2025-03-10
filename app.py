@@ -11,6 +11,7 @@ from flask import request, jsonify, redirect, url_for
 import jwt
 import datetime
 from models import User, Project, UserSession, UserActivityLog
+from routes.AI_assistant import ai_bp
 from routes.admin import admin_bp
 from routes.announcements import announcement_bp
 from routes.filemanagement import files_bp
@@ -35,6 +36,7 @@ app.register_blueprint(admin_bp, url_prefix='/api/admin')
 
 app.register_blueprint(training_bp, url_prefix='/api/training')
 
+app.register_blueprint(ai_bp, url_prefix='/api/ai')  # 注册AI蓝图
 
 # 用户登录接口
 @app.route('/api/login', methods=['POST'])

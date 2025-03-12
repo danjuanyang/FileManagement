@@ -1,4 +1,4 @@
-# routes/deepseek_routes.py
+# routes/AI_assistant.py
 import os
 import requests
 from datetime import datetime
@@ -18,6 +18,7 @@ CORS(ai_bp)  # 为此蓝图启用 CORS
 
 # DeepSeek API 配置
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
+
 
 def get_user_api_key(user_id):
     """获取当前用户的 API 密钥"""
@@ -64,13 +65,38 @@ def call_deepseek_api(messages, user_id, model="deepseek-chat"):
 @token_required
 def get_api_keys(current_user):
     """获取用户的所有 API 密钥"""
-    api_keys = AIApi.query.filter_by(user_id=current_user.id).all()
-    return jsonify([{
-        'id': api.id,
-        'ai_model': api.ai_model,
-        'api_key': '*' * 4 + api.api_key[-4:] if api.api_key else '',  # 只显示最后4位
-        'updated_at': api.updated_at.isoformat() if api.updated_at else None
-    } for api in api_keys])
+    # 检查是否为管理员，并是否指定了用户ID
+    is_admin = current_user.role == 1
+    target_user_id = request.args.get('user_id', type=int)
+
+    if is_admin and target_user_id:
+        # 管理员可以查看指定用户的API密钥
+        api_keys = AIApi.query.filter_by(user_id=target_user_id).all()
+    elif is_admin:
+        # 管理员查看所有API密钥
+        api_keys = AIApi.query.all()
+    else:
+        # 普通用户只能查看自己的API密钥
+        api_keys = AIApi.query.filter_by(user_id=current_user.id).all()
+
+    result = []
+    for api in api_keys:
+        # 获取用户名（仅管理员需要）
+        username = None
+        if is_admin:
+            user = User.query.filter_by(id=api.user_id).first()
+            username = user.username if user else "未知用户"
+
+        result.append({
+            'id': api.id,
+            'user_id': api.user_id,
+            'username': username,
+            'ai_model': api.ai_model,
+            'api_key': '*' * 4 + api.api_key[-4:] if api.api_key else '',  # 只显示最后4位
+            'updated_at': api.updated_at.isoformat() if api.updated_at else None
+        })
+
+    return jsonify(result)
 
 
 @ai_bp.route('/api-keys', methods=['POST'])
@@ -79,13 +105,32 @@ def get_api_keys(current_user):
 def add_api_key(current_user):
     """添加新的 API 密钥"""
     data = request.json
+    is_admin = current_user.role == 1
 
     if not data.get('api_key'):
         return jsonify({"error": "API密钥是必填项"}), 400
 
+    if not data.get('ai_model'):
+        return jsonify({"error": "AI模型是必填项"}), 400
+
+    # 确定用户ID
+    if is_admin:
+        # 管理员必须指定用户
+        if not data.get('user_id'):
+            return jsonify({"error": "管理员必须指定目标用户"}), 400
+
+        # 验证目标用户是否存在
+        target_user_id = data.get('user_id')
+        target_user = User.query.get(target_user_id)
+        if not target_user:
+            return jsonify({"error": "指定的用户不存在"}), 404
+    else:
+        # 普通用户只能为自己添加API密钥
+        target_user_id = current_user.id
+
     try:
         new_api = AIApi(
-            user_id=current_user.id,
+            user_id=target_user_id,
             ai_model=data.get('ai_model', 'deepseek-chat'),
             api_key=data.get('api_key'),
             updated_at=datetime.now()
@@ -93,8 +138,16 @@ def add_api_key(current_user):
         db.session.add(new_api)
         db.session.commit()
 
+        # 获取用户名（仅管理员需要）
+        username = None
+        if is_admin:
+            user = User.query.filter_by(id=target_user_id).first()
+            username = user.username if user else "未知用户"
+
         return jsonify({
             'id': new_api.id,
+            'user_id': new_api.user_id,
+            'username': username,
             'ai_model': new_api.ai_model,
             'api_key': '*' * 4 + new_api.api_key[-4:] if new_api.api_key else '',
             'updated_at': new_api.updated_at.isoformat() if new_api.updated_at else None
@@ -111,10 +164,15 @@ def add_api_key(current_user):
 @token_required
 def delete_api_key(current_user, api_id):
     """删除 API 密钥"""
-    api = AIApi.query.filter_by(id=api_id, user_id=current_user.id).first()
+    is_admin = current_user.role == 1
+    api = AIApi.query.get(api_id)
 
     if not api:
         return jsonify({"error": "未找到API密钥"}), 404
+
+    # 权限检查
+    if not is_admin and api.user_id != current_user.id:
+        return jsonify({"error": "无权限删除此API密钥"}), 403
 
     try:
         db.session.delete(api)
@@ -134,24 +192,50 @@ def get_conversations(current_user):
     """获取用户的所有对话"""
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
+    is_admin = current_user.role == 1
+    target_user_id = request.args.get('user_id', type=int)
 
-    conversations = AIConversation.query.filter_by(
-        user_id=current_user.id,
-        is_archived=False
-    ).order_by(AIConversation.updated_at.desc()).paginate(page=page, per_page=per_page)
+    # 构建查询
+    query = AIConversation.query.filter_by(is_archived=False)
 
-    return jsonify({
-        'items': [{
+    # if is_admin and target_user_id:
+    #     # 管理员查看特定用户的对话
+    #     query = query.filter_by(user_id=target_user_id)
+    # elif not is_admin:
+    #     # 普通用户只能查看自己的对话
+    #     query = query.filter_by(user_id=current_user.id)
+
+    # 管理员和用户都只能看到自己会话
+    query = query.filter_by(user_id=current_user.id)
+
+    # 按更新时间排序并分页
+    conversations = query.order_by(AIConversation.updated_at.desc()).paginate(page=page, per_page=per_page)
+
+    result = {
+        'items': [],
+        'total': conversations.total,
+        'pages': conversations.pages,
+        'page': page
+    }
+
+    for conv in conversations.items:
+        # 获取用户名（仅管理员需要）
+        username = None
+        if is_admin:
+            user = User.query.filter_by(id=conv.user_id).first()
+            username = user.username if user else "未知用户"
+
+        result['items'].append({
             'id': conv.id,
+            'user_id': conv.user_id,
+            'username': username,
             'title': conv.title,
             'created_at': conv.created_at.isoformat() if conv.created_at else None,
             'updated_at': conv.updated_at.isoformat() if conv.updated_at else None,
             'tags': [tag.name for tag in conv.tags]
-        } for conv in conversations.items],
-        'total': conversations.total,
-        'pages': conversations.pages,
-        'page': page
-    })
+        })
+
+    return jsonify(result)
 
 
 @ai_bp.route('/conversations', methods=['POST'])
@@ -218,15 +302,28 @@ def create_conversation(current_user):
 @token_required
 def get_conversation(current_user, conv_id):
     """获取特定对话及其消息"""
-    conversation = AIConversation.query.filter_by(id=conv_id, user_id=current_user.id).first()
+    is_admin = current_user.role == 1
+    conversation = AIConversation.query.get(conv_id)
 
     if not conversation:
         return jsonify({"error": "未找到对话"}), 404
 
+    # 权限检查
+    if not is_admin and conversation.user_id != current_user.id:
+        return jsonify({"error": "无权访问此对话"}), 403
+
     messages = AIMessage.query.filter_by(conversation_id=conv_id).order_by(AIMessage.created_at).all()
+
+    # 获取用户名（仅管理员需要）
+    username = None
+    if is_admin:
+        user = User.query.filter_by(id=conversation.user_id).first()
+        username = user.username if user else "未知用户"
 
     return jsonify({
         'id': conversation.id,
+        'user_id': conversation.user_id,
+        'username': username,
         'title': conversation.title,
         'created_at': conversation.created_at.isoformat() if conversation.created_at else None,
         'updated_at': conversation.updated_at.isoformat() if conversation.updated_at else None,
@@ -247,10 +344,15 @@ def get_conversation(current_user, conv_id):
 @token_required
 def update_conversation(current_user, conv_id):
     """更新对话（如标题、标签等）"""
-    conversation = AIConversation.query.filter_by(id=conv_id, user_id=current_user.id).first()
+    is_admin = current_user.role == 1
+    conversation = AIConversation.query.get(conv_id)
 
     if not conversation:
         return jsonify({"error": "未找到对话"}), 404
+
+    # 权限检查
+    if not is_admin and conversation.user_id != current_user.id:
+        return jsonify({"error": "无权更新此对话"}), 403
 
     data = request.json
 
@@ -278,8 +380,16 @@ def update_conversation(current_user, conv_id):
         conversation.updated_at = datetime.now()
         db.session.commit()
 
+        # 获取用户名（仅管理员需要）
+        username = None
+        if is_admin:
+            user = User.query.filter_by(id=conversation.user_id).first()
+            username = user.username if user else "未知用户"
+
         return jsonify({
             'id': conversation.id,
+            'user_id': conversation.user_id,
+            'username': username,
             'title': conversation.title,
             'created_at': conversation.created_at.isoformat() if conversation.created_at else None,
             'updated_at': conversation.updated_at.isoformat() if conversation.updated_at else None,
@@ -298,10 +408,15 @@ def update_conversation(current_user, conv_id):
 @token_required
 def delete_conversation(current_user, conv_id):
     """删除对话（实际上是归档）"""
-    conversation = AIConversation.query.filter_by(id=conv_id, user_id=current_user.id).first()
+    is_admin = current_user.role == 1
+    conversation = AIConversation.query.get(conv_id)
 
     if not conversation:
         return jsonify({"error": "未找到对话"}), 404
+
+    # 权限检查
+    if not is_admin and conversation.user_id != current_user.id:
+        return jsonify({"error": "无权删除此对话"}), 403
 
     try:
         # 可以选择软删除（归档）或硬删除
@@ -325,10 +440,15 @@ def delete_conversation(current_user, conv_id):
 @token_required
 def send_message(current_user, conv_id):
     """发送新消息并获取 AI 回复"""
-    conversation = AIConversation.query.filter_by(id=conv_id, user_id=current_user.id).first()
+    is_admin = current_user.role == 1
+    conversation = AIConversation.query.get(conv_id)
 
     if not conversation:
         return jsonify({"error": "未找到对话"}), 404
+
+    # 权限检查
+    if not is_admin and conversation.user_id != current_user.id:
+        return jsonify({"error": "无权访问此对话"}), 403
 
     data = request.json
     if not data.get('content'):
@@ -353,7 +473,7 @@ def send_message(current_user, conv_id):
         message_history = [{"role": msg.role, "content": msg.content} for msg in messages]
 
         # 调用 DeepSeek API
-        ai_response, status_code = call_deepseek_api(message_history, current_user.id, model)
+        ai_response, status_code = call_deepseek_api(message_history, conversation.user_id, model)
 
         if status_code != 200:
             return jsonify(ai_response), status_code
@@ -412,14 +532,18 @@ def send_message(current_user, conv_id):
 @token_required
 def add_message_feedback(current_user, msg_id):
     """为 AI 消息添加反馈"""
+    is_admin = current_user.role == 1
     message = AIMessage.query.filter_by(id=msg_id, role='assistant').first()
 
     if not message:
         return jsonify({"error": "未找到消息"}), 404
 
-    # 确认用户拥有该消息所属的对话
-    conversation = AIConversation.query.filter_by(id=message.conversation_id, user_id=current_user.id).first()
+    # 确认用户拥有该消息所属的对话或是管理员
+    conversation = AIConversation.query.get(message.conversation_id)
     if not conversation:
+        return jsonify({"error": "未找到对话"}), 404
+
+    if not is_admin and conversation.user_id != current_user.id:
         return jsonify({"error": "无权访问此消息"}), 403
 
     data = request.json
@@ -458,6 +582,55 @@ def add_message_feedback(current_user, msg_id):
         return jsonify({"error": "保存反馈失败"}), 500
 
 
+@ai_bp.route('/feedbacks', methods=['GET'])
+@track_activity
+@token_required
+def get_feedbacks(current_user):
+    """获取消息反馈列表"""
+    is_admin = current_user.role == 1
+    target_user_id = request.args.get('user_id', type=int)
+
+    # 基本查询
+    query = db.session.query(
+        AIMessageFeedback,
+        AIMessage.content.label('message_content'),
+        AIConversation.user_id.label('user_id'),
+        User.username.label('username')
+    ).join(
+        AIMessage, AIMessageFeedback.message_id == AIMessage.id
+    ).join(
+        AIConversation, AIMessage.conversation_id == AIConversation.id
+    ).join(
+        User, AIConversation.user_id == User.id
+    )
+
+    # 权限过滤
+    if is_admin and target_user_id:
+        # 管理员查看特定用户的反馈
+        query = query.filter(AIConversation.user_id == target_user_id)
+    elif not is_admin:
+        # 普通用户只能查看自己的反馈
+        query = query.filter(AIConversation.user_id == current_user.id)
+
+    # 执行查询
+    results = query.order_by(AIMessageFeedback.created_at.desc()).all()
+
+    feedbacks = []
+    for feedback, message_content, user_id, username in results:
+        feedbacks.append({
+            'id': feedback.id,
+            'message_id': feedback.message_id,
+            'message_content': message_content,
+            'user_id': user_id,
+            'username': username,
+            'rating': feedback.rating,
+            'feedback_text': feedback.feedback_text,
+            'created_at': feedback.created_at.isoformat() if feedback.created_at else None
+        })
+
+    return jsonify(feedbacks)
+
+
 @ai_bp.route('/tags', methods=['GET'])
 @track_activity
 @token_required
@@ -475,11 +648,27 @@ def get_tags(current_user):
 @token_required
 def get_usage_stats(current_user):
     """获取用户的 API 使用统计信息"""
+    is_admin = current_user.role == 1
+    target_user_id = request.args.get('user_id', type=int)
+
+    # 确定要查询的用户ID
+    if is_admin and target_user_id:
+        user_id = target_user_id
+    else:
+        user_id = current_user.id
+
     # 获取总对话数
-    total_conversations = AIConversation.query.filter_by(user_id=current_user.id).count()
+    total_conversations_query = AIConversation.query
+
+    # 管理员可以查看所有用户的统计
+    if is_admin and not target_user_id:
+        total_conversations = total_conversations_query.count()
+        conversation_ids = [c.id for c in total_conversations_query.all()]
+    else:
+        total_conversations = total_conversations_query.filter_by(user_id=user_id).count()
+        conversation_ids = [c.id for c in total_conversations_query.filter_by(user_id=user_id).all()]
 
     # 获取总消息数
-    conversation_ids = [c.id for c in AIConversation.query.filter_by(user_id=current_user.id).all()]
     total_messages = AIMessage.query.filter(
         AIMessage.conversation_id.in_(conversation_ids)).count() if conversation_ids else 0
 

@@ -86,11 +86,14 @@ def get_api_keys(current_user):
         if is_admin:
             user = User.query.filter_by(id=api.user_id).first()
             username = user.username if user else "未知用户"
+        else:
+            # 普通用户只能查看自己的用户名
+            username = current_user.username
 
         result.append({
             'id': api.id,
             'user_id': api.user_id,
-            'username': username,
+            'username': username,  # 返回对应的用户名
             'ai_model': api.ai_model,
             'api_key': '*' * 4 + api.api_key[-4:] if api.api_key else '',  # 只显示最后4位
             'updated_at': api.updated_at.isoformat() if api.updated_at else None

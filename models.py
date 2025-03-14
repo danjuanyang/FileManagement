@@ -395,7 +395,20 @@ class AnnouncementReadStatus(db.Model):
         db.UniqueConstraint('announcement_id', 'user_id', name='_announcement_user_uc'),
     )
 
+# 公告附件表
+class AnnouncementAttachment(db.Model):
+    __tablename__ = 'announcement_attachments'
 
+    id = db.Column(db.Integer, primary_key=True)
+    announcement_id = db.Column(db.Integer, db.ForeignKey('announcements.id', ondelete='CASCADE'), nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False)
+    stored_filename = db.Column(db.String(255), nullable=False)
+    file_size = db.Column(db.Integer, nullable=False)  # 大小（以字节为单位）
+    file_type = db.Column(db.String(100))
+    uploaded_at = db.Column(db.DateTime, default=datetime.now)
+
+    # 与公告的关系
+    announcement = db.relationship('Announcement', backref=db.backref('attachments', cascade='all, delete-orphan'))
 
 # -----------------------------------------------------------------------------------------
 

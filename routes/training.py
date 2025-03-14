@@ -530,16 +530,12 @@ def add_reply(comment_id):
         }), 500
 
 
-# 预览PDF文件 - 使用PyMuPDF (fitz)，添加缓存功能
 @training_bp.route('/preview/<path:filename>')
 @token_required
 def preview_training_file(current_user, filename):
     try:
         # 解码文件名
         filename = urllib.parse.unquote(filename)
-
-        # 检查是否强制刷新缓存
-        force_refresh = request.args.get('force_refresh', '').lower() == 'true'
 
         # 构建完整的文件路径
         file_path = os.path.join(current_app.root_path, 'uploads', filename)
@@ -550,51 +546,31 @@ def preview_training_file(current_user, filename):
                 'message': '文件不存在'
             }), 404
 
-        # 处理PDF文件
+        # 对于PDF文件，返回文件信息和访问URL，而不是转换为图像
         if file_path.lower().endswith('.pdf'):
-            # 生成缓存键
-            cache_key = generate_cache_key(file_path)
+            # 计算文件大小
+            file_size = os.path.getsize(file_path)
 
-            # 如果不是强制刷新，尝试从缓存获取
-            if not force_refresh:
-                cached_result = get_cache(cache_key)
+            # 生成用于前端访问的URL
+            file_url = f'/api/training/view/{urllib.parse.quote(filename)}'
 
-                if cached_result:
-                    print(f"缓存命中: {filename}")
-                    return jsonify({
-                        'code': 200,
-                        'data': {
-                            'slides': cached_result['slides'],
-                            'total_slides': cached_result['total_slides'],
-                            'from_cache': True
-                        }
-                    })
-            elif force_refresh:
-                print(f"强制刷新缓存: {filename}")
-
-            # 缓存未命中或强制刷新，处理PDF
-            print(f"处理PDF: {filename}")
-            handler = PDFPreviewHandler()
-            result = handler.process_pdf(file_path)
-
-            if not result['success']:
-                return jsonify({
-                    'code': 500,
-                    'message': f'处理PDF失败: {result["error"]}'
-                }), 500
-
-            # 保存到缓存（即使是强制刷新也需要更新缓存）
-            save_cache(cache_key, {
-                'slides': result['slides'],
-                'total_slides': result['total_slides']
-            })
+            # 尝试获取PDF页数
+            try:
+                import fitz  # PyMuPDF
+                doc = fitz.open(file_path)
+                page_count = len(doc)
+                doc.close()
+            except Exception as e:
+                print(f"获取PDF页数失败: {str(e)}")
+                page_count = 0
 
             return jsonify({
                 'code': 200,
                 'data': {
-                    'slides': result['slides'],
-                    'total_slides': result['total_slides'],
-                    'from_cache': False
+                    'file_url': file_url,
+                    'file_size': file_size,
+                    'page_count': page_count,
+                    'file_name': os.path.basename(file_path)
                 }
             })
         else:
@@ -604,13 +580,83 @@ def preview_training_file(current_user, filename):
             }), 400
 
     except Exception as e:
-        print(f"预览生成失败: {str(e)}")
+        print(f"获取文件信息失败: {str(e)}")
         import traceback
         print(traceback.format_exc())
         return jsonify({
             'code': 500,
-            'message': f'预览生成失败: {str(e)}'
+            'message': f'获取文件信息失败: {str(e)}'
         }), 500
+
+
+# 4. 添加新路由用于直接查看PDF文件
+@training_bp.route('/view/<path:filename>')
+# 修改为支持URL参数获取token
+@training_bp.route('/view/<path:filename>')
+def view_pdf_file(filename):
+    try:
+        # 从URL参数获取token
+        token = request.args.get('token')
+        if not token:
+            return jsonify({
+                'code': 401,
+                'message': '未授权访问'
+            }), 401
+
+        # 验证token
+        try:
+            # 使用与token_required相同的验证逻辑
+            import jwt
+            from flask import current_app
+            from models import User
+
+            data = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=['HS256'])
+            current_user = User.query.filter_by(id=data['user_id']).first()
+
+            if not current_user:
+                return jsonify({'code': 401, 'message': '用户不存在'}), 401
+
+        except jwt.ExpiredSignatureError:
+            return jsonify({'code': 401, 'message': 'token已过期'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'code': 401, 'message': '无效的token'}), 401
+        except Exception as e:
+            return jsonify({
+                'code': 401,
+                'message': f'token验证失败: {str(e)}'
+            }), 401
+
+        # 解码文件名
+        filename = urllib.parse.unquote(filename)
+
+        # 构建完整的文件路径
+        file_path = os.path.join(current_app.root_path, 'uploads', filename)
+
+        if not os.path.exists(file_path):
+            return jsonify({
+                'code': 404,
+                'message': '文件不存在'
+            }), 404
+
+        # 获取文件目录和文件名
+        directory = os.path.dirname(file_path)
+        return send_from_directory(
+            directory,
+            os.path.basename(file_path),
+            mimetype='application/pdf',
+            as_attachment=False  # 不作为附件，直接在浏览器中显示
+        )
+
+    except Exception as e:
+        print(f"查看文件失败: {str(e)}")
+        return jsonify({
+            'code': 500,
+            'message': f'查看文件失败: {str(e)}'
+        }), 500
+
+
+
+
 
 
 # 下载文件

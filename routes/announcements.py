@@ -1,7 +1,5 @@
 # routes/announcements.py
 import os
-from fileinput import filename
-
 from flask import Blueprint, request, jsonify, send_from_directory
 from flask_cors import CORS
 from datetime import datetime
@@ -74,11 +72,11 @@ def create_announcement(current_user):
 
         for file in files:
             if file and file.filename and allowed_file(file.filename):
-                original_filename = secure_filename(file.filename)
+                # 保持原始文件名不变
+                original_filename = file.filename
 
-                # 为防止文件名冲突，仍然创建一个唯一的存储文件名
-                # 但在数据库中将保留原始文件名
-                file_ext = os.path.splitext(original_filename)[1]
+                # 为防止文件名冲突，创建一个唯一的存储文件名
+                file_ext = os.path.splitext(original_filename)[1] if '.' in original_filename else ''
                 unique_id = f"{announcement.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
                 stored_filename = f"{unique_id}{file_ext}"
                 file_path = os.path.join(UPLOAD_FOLDER, stored_filename)
@@ -86,19 +84,19 @@ def create_announcement(current_user):
                 # 保存文件
                 file.save(file_path)
 
-                # 创建附件记录 - 保持原始文件名不变
+                # 创建附件记录 - 使用原始文件名
                 attachment = AnnouncementAttachment(
                     announcement_id=announcement.id,
-                    original_filename=original_filename,  # 原始文件名
+                    original_filename=original_filename,  # 安全处理后的原始文件名
                     stored_filename=stored_filename,  # 存储用的唯一文件名
                     file_size=os.path.getsize(file_path),
                     file_type=file.content_type if hasattr(file, 'content_type') else None
                 )
                 db.session.add(attachment)
-                attachments.append({
-                    # 'filename': original_filename,  #在此处使用 original_filename，而不是导入的函数
-                    'filename': file.filename,  #在此处使用 original_filename，而不是导入的函数
 
+                # 在响应中使用原始文件名，保持与数据库一致
+                attachments.append({
+                    'filename': original_filename,  # 使用安全处理后的原始文件名
                     'size': attachment.file_size
                 })
 
@@ -131,6 +129,7 @@ def create_announcement(current_user):
 
 
 # 下载附件
+# 下载附件
 @announcement_bp.route('/announcements/<int:announcement_id>/attachments/<int:attachment_id>', methods=['GET'])
 @track_activity
 @token_required
@@ -153,13 +152,23 @@ def download_attachment(current_user, announcement_id, attachment_id):
             read_status.read_at = datetime.now()
             db.session.commit()
 
-        # 返回文件
-        return send_from_directory(
+        # 修复：使用 werkzeug 的安全文件名确保文件名与标头兼容
+        # 和 URL 对 Content-Disposition 标头的文件名进行编码
+        from urllib.parse import quote
+        encoded_filename = quote(attachment.original_filename)
+
+        # 明确设置响应头以确保文件名正确传递
+        response = send_from_directory(
             UPLOAD_FOLDER,
             attachment.stored_filename,
             as_attachment=True,
             download_name=attachment.original_filename
         )
+
+        # 简化的 Content-Disposition 标头与 HTTP 1.1 规范兼容
+        response.headers['Content-Disposition'] = f"attachment; filename={encoded_filename}"
+
+        return response
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -393,9 +402,13 @@ def update_announcement(current_user, announcement_id):
 
             for file in files:
                 if file and file.filename and allowed_file(file.filename):
-                    filename = secure_filename(file.filename)
-                    # 生成唯一的文件名
-                    stored_filename = f"{announcement.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+                    # 保持原始文件名不变
+                    original_filename = file.filename
+
+                    # 生成唯一的存储文件名
+                    file_ext = os.path.splitext(original_filename)[1] if '.' in original_filename else ''
+                    unique_id = f"{announcement.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                    stored_filename = f"{unique_id}{file_ext}"
                     file_path = os.path.join(UPLOAD_FOLDER, stored_filename)
 
                     # 保存文件
@@ -404,14 +417,14 @@ def update_announcement(current_user, announcement_id):
                     # 创建附件记录
                     attachment = AnnouncementAttachment(
                         announcement_id=announcement.id,
-                        original_filename=filename,
+                        original_filename=original_filename,  # 安全处理后的原始文件名
                         stored_filename=stored_filename,
                         file_size=os.path.getsize(file_path),
                         file_type=file.content_type if hasattr(file, 'content_type') else None
                     )
                     db.session.add(attachment)
                     attachments.append({
-                        'filename': filename,
+                        'filename': original_filename,  # 使用安全处理后的原始文件名
                         'size': attachment.file_size
                     })
                     content_changed = True

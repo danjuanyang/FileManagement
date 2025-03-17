@@ -88,54 +88,6 @@ def create_project(current_user):
 
 
 # 更新项目
-# @leader_bp.route('/projects/<int:project_id>', methods=['PUT'])
-# @token_required
-# def update_project(project_id):
-#     project = Project.query.get_or_404(project_id)
-#     data = request.get_json()
-#
-#     # 明确定义可更新的字段及其处理方式
-#     update_handlers = {
-#         'name': lambda x: x,
-#         'description': lambda x: x,
-#         'status': lambda x: x,
-#         'progress': lambda x: x,
-#         'start_date': lambda x: datetime.fromisoformat(x),
-#         'deadline': lambda x: datetime.fromisoformat(x),
-#         'employee': lambda x: User.query.get(x) if x else None,
-#         'employee_id': lambda x: User.query.get(x) if x else None
-#     }
-#
-#     try:
-#         for key, value in data.items():
-#             if key in update_handlers:
-#                 if key == 'employee' or key == 'employee_id':
-#                     if value:
-#                         employee = User.query.get(value)
-#                         if employee is None:
-#                             return jsonify({'error': f'员工ID {value} 不存在'}), 400
-#                         project.employee = employee
-#                 else:
-#                     processed_value = update_handlers[key](value)
-#                     setattr(project, key, processed_value)
-#         db.session.commit()
-#         return jsonify({
-#             'message': '项目更新成功',
-#             'project': {
-#                 'id': project.id,
-#                 'name': project.name,
-#                 'description': project.description,
-#                 'employee': project.employee.username if project.employee else None,
-#                 'start_date': project.start_date.isoformat() if project.start_date else None,
-#                 'deadline': project.deadline.isoformat() if project.deadline else None,
-#                 'progress': project.progress,
-#                 'status': project.status
-#             }
-#         })
-#     except Exception as e:
-#         db.session.rollback()
-#         return jsonify({'error': str(e)}), 500
-
 @leader_bp.route('/projects/<int:project_id>', methods=['PUT'])
 @token_required
 def update_project(current_user, project_id):  # 修改函数签名，接收 current_user 参数
@@ -637,55 +589,6 @@ def delete_user(current_user, user_id):
         print(f"删除用户错误: {str(e)}")  # 添加日志输出
         return jsonify({'error': f'删除用户失败: {str(e)}'}), 500
 
-
-# 管理员修改用户密码
-# 暂时不使用
-# @leader_bp.route('/users/<int:user_id>/change-password', methods=['PUT'])
-# @token_required
-# def change_user_password(current_user, user_id):
-#     if current_user.role != 1:
-#         return jsonify({'error': '权限不足'}), 403
-#
-#     try:
-#         user = User.query.get_or_404(user_id)
-#         data = request.get_json()
-#
-#         # 验证必要字段
-#         if not all(k in data for k in ('old_password', 'new_password')):
-#             return jsonify({'error': '缺少必要字段'}), 400
-#
-#         # 验证旧密码是否正确
-#         if not user.check_password(data['old_password']):
-#             return jsonify({'error': '旧密码不正确'}), 400
-#
-#         # 验证新密码
-#         new_password = data['new_password']
-#         if len(new_password) < 6:
-#             return jsonify({'error': '密码长度必须大于6位'}), 400
-#
-#         # 验证新密码复杂度（至少包含数字和字母）
-#         if not any(c.isdigit() for c in new_password) or not any(c.isalpha() for c in new_password):
-#             return jsonify({'error': '密码必须包含数字和字母'}), 400
-#
-#         # 更新密码
-#         user.set_password(new_password)
-#
-#         # 记录活动
-#         log_user_activity(
-#             user_id=current_user.id,
-#             action_type='change_password',
-#             action_detail=f'管理员修改用户 {user.username} 的密码',
-#             resource_type='user',
-#             resource_id=user.id
-#         )
-#
-#         db.session.commit()
-#
-#         return jsonify({'message': '密码修改成功'})
-#
-#     except Exception as e:
-#         db.session.rollback()
-#         return jsonify({'error': str(e)}), 500
 
 @leader_bp.route('/users/<int:user_id>/change-password', methods=['PUT'])
 @token_required

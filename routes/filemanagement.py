@@ -22,7 +22,7 @@ from flask import Blueprint, request, jsonify, send_file, abort, current_app
 from flask_cors import CORS
 from flask import jsonify, request
 import os
-from models import db, Project, ProjectFile, ProjectStage, User, StageTask, FileContent, UserActivityLog
+from models import db, Project, ProjectFile, ProjectStage, User, StageTask, FileContent, UserActivityLog, Subproject
 from auth import get_employee_id
 from utils.activity_tracking import track_activity
 from docx import Document
@@ -121,17 +121,54 @@ def get_user_display_name(user):
     return f"User_{user.id}" if hasattr(user, 'id') else "Unknown User"
 
 
-def create_upload_path(user_id, project_id, stage_id, task_id=None):
-    """创建并返回上传路径"""
+# def create_upload_path(user_id, project_id, stage_id, task_id=None):
+#     """创建并返回上传路径"""
+#     try:
+#         # 获取必要信息
+#         user = User.query.get_or_404(user_id)
+#         project = Project.query.get_or_404(project_id)
+#         stage = ProjectStage.query.get_or_404(stage_id)
+#
+#         # 安全地处理各个路径组件，保留中文
+#         safe_user = get_safe_path_component(user.username)
+#         safe_project = get_safe_path_component(project.name)
+#         safe_stage = get_safe_path_component(stage.name)
+#
+#         # 如果有任务ID，获取任务名称
+#         safe_task = ''
+#         if task_id:
+#             task = StageTask.query.get_or_404(task_id)
+#             safe_task = get_safe_path_component(task.name)
+#
+#         # 构建完整路径
+#         if task_id:
+#             relative_path = os.path.join(UPLOAD_FOLDER, safe_user, safe_project, safe_stage, safe_task)
+#         else:
+#             relative_path = os.path.join(UPLOAD_FOLDER, safe_user, safe_project, safe_stage)
+#
+#         absolute_path = os.path.join(current_app.root_path, relative_path)
+#
+#         # 确保目录存在
+#         os.makedirs(absolute_path, exist_ok=True)
+#
+#         return relative_path, absolute_path
+#     except Exception as e:
+#         raise Exception(f"创建上传路径失败: {str(e)}")
+
+# 2025年3月17日14:53:16
+def create_upload_path(user_id, project_id, subproject_id, stage_id, task_id=None):
+    """创建并返回上传路径，包含子项目层级"""
     try:
         # 获取必要信息
         user = User.query.get_or_404(user_id)
         project = Project.query.get_or_404(project_id)
+        subproject = Subproject.query.get_or_404(subproject_id)
         stage = ProjectStage.query.get_or_404(stage_id)
 
         # 安全地处理各个路径组件，保留中文
         safe_user = get_safe_path_component(user.username)
         safe_project = get_safe_path_component(project.name)
+        safe_subproject = get_safe_path_component(subproject.name)
         safe_stage = get_safe_path_component(stage.name)
 
         # 如果有任务ID，获取任务名称
@@ -140,11 +177,11 @@ def create_upload_path(user_id, project_id, stage_id, task_id=None):
             task = StageTask.query.get_or_404(task_id)
             safe_task = get_safe_path_component(task.name)
 
-        # 构建完整路径
+        # 构建完整路径，添加子项目层级
         if task_id:
-            relative_path = os.path.join(UPLOAD_FOLDER, safe_user, safe_project, safe_stage, safe_task)
+            relative_path = os.path.join(UPLOAD_FOLDER, safe_user, safe_project, safe_subproject, safe_stage, safe_task)
         else:
-            relative_path = os.path.join(UPLOAD_FOLDER, safe_user, safe_project, safe_stage)
+            relative_path = os.path.join(UPLOAD_FOLDER, safe_user, safe_project, safe_subproject, safe_stage)
 
         absolute_path = os.path.join(current_app.root_path, relative_path)
 
@@ -154,6 +191,8 @@ def create_upload_path(user_id, project_id, stage_id, task_id=None):
         return relative_path, absolute_path
     except Exception as e:
         raise Exception(f"创建上传路径失败: {str(e)}")
+
+
 
 
 def generate_unique_filename(directory, original_filename):
@@ -210,6 +249,49 @@ def check_stage_progress(stage_id):
 
 
 # 获取文件列表
+# @files_bp.route('/stage/<int:stage_id>/task/<int:task_id>', methods=['GET'])
+# @track_activity
+# def get_stage_task_files(stage_id, task_id):
+#     try:
+#         files = ProjectFile.query.filter_by(
+#             stage_id=stage_id,
+#             task_id=task_id
+#         ).all()
+#
+#         files_data = []
+#         for file in files:
+#             # 获取上传用户信息
+#             uploader = User.query.get(file.upload_user_id)
+#             uploader_name = get_user_display_name(uploader)
+#
+#             # 获取文件大小
+#             try:
+#                 file_size = os.path.getsize(os.path.join(current_app.root_path, file.file_path)) if os.path.exists(
+#                     os.path.join(current_app.root_path, file.file_path)) else 0
+#             except:
+#                 file_size = 0
+#
+#             files_data.append({
+#                 'id': file.id,
+#                 'fileName': file.file_name,
+#                 'originalName': file.original_name,
+#                 'fileSize': file_size,
+#                 'fileType': file.file_type,
+#                 'uploadTime': file.upload_date.isoformat(),
+#                 'uploader': uploader_name,
+#                 'stageName': file.stage.name if file.stage else None,
+#                 'taskName': file.task.name if file.task else None,
+#                 'is_public': file.is_public
+#             })
+#
+#         return jsonify(files_data)
+#
+#     except Exception as e:
+#         print(f"获取阶段文件时出错： {str(e)}")
+#         return jsonify({'error': str(e)}), 500
+
+
+# 2025年3月17日14:54:14
 @files_bp.route('/stage/<int:stage_id>/task/<int:task_id>', methods=['GET'])
 @track_activity
 def get_stage_task_files(stage_id, task_id):
@@ -240,6 +322,8 @@ def get_stage_task_files(stage_id, task_id):
                 'fileType': file.file_type,
                 'uploadTime': file.upload_date.isoformat(),
                 'uploader': uploader_name,
+                'projectName': file.project.name if file.project else None,
+                'subprojectName': file.subproject.name if file.subproject else None,  # 添加子项目名称
                 'stageName': file.stage.name if file.stage else None,
                 'taskName': file.task.name if file.task else None,
                 'is_public': file.is_public
@@ -251,23 +335,141 @@ def get_stage_task_files(stage_id, task_id):
         print(f"获取阶段文件时出错： {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+# 2025年3月17日14:54:58
+@files_bp.route('/subproject/<int:subproject_id>/files', methods=['GET'])
+@track_activity
+def get_subproject_files(subproject_id):
+    try:
+        files = ProjectFile.query.filter_by(
+            subproject_id=subproject_id
+        ).all()
+
+        files_data = []
+        for file in files:
+            # 获取上传用户信息
+            uploader = User.query.get(file.upload_user_id)
+            uploader_name = get_user_display_name(uploader)
+
+            # 获取文件大小
+            try:
+                file_size = os.path.getsize(os.path.join(current_app.root_path, file.file_path)) if os.path.exists(
+                    os.path.join(current_app.root_path, file.file_path)) else 0
+            except:
+                file_size = 0
+
+            files_data.append({
+                'id': file.id,
+                'fileName': file.file_name,
+                'originalName': file.original_name,
+                'fileSize': file_size,
+                'fileType': file.file_type,
+                'uploadTime': file.upload_date.isoformat(),
+                'uploader': uploader_name,
+                'projectName': file.project.name if file.project else None,
+                'subprojectName': file.subproject.name if file.subproject else None,
+                'stageName': file.stage.name if file.stage else None,
+                'taskName': file.task.name if file.task else None,
+                'is_public': file.is_public
+            })
+
+        return jsonify(files_data)
+
+    except Exception as e:
+        print(f"获取子项目文件时出错： {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 
 # 上传文件，带索引
-@files_bp.route('/<int:project_id>/stages/<int:stage_id>/tasks/<int:task_id>/upload', methods=['POST'])
+# @files_bp.route('/<int:project_id>/stages/<int:stage_id>/tasks/<int:task_id>/upload', methods=['POST'])
+# @track_activity
+# def upload_task_file(project_id, stage_id, task_id):
+#     file = request.files.get('file')
+#     is_public = request.form.get('is_public', 'false').lower() == 'true'  # 获取是否公开的参数
+#
+#     if not file:
+#         return jsonify({'error': '请提供文件'}), 400
+#
+#     # 验证任务、阶段和项目的关系
+#     task = StageTask.query.get_or_404(task_id)
+#     stage = ProjectStage.query.get_or_404(stage_id)
+#
+#     if task.stage_id != stage_id or stage.project_id != project_id:
+#         return jsonify({'error': '任务、阶段或项目信息不匹配'}), 400
+#
+#     # 验证文件类型和大小
+#     if not allowed_file(file.filename):
+#         return jsonify({'error': '文件类型不允许'}), 400
+#     if file.content_length > MAX_FILE_SIZE:
+#         return jsonify({'error': '文件大小超过限制'}), 400
+#
+#     # 构建上传路径
+#     employee_id = get_employee_id()
+#     try:
+#         relative_path, absolute_path = create_upload_path(employee_id, project_id, stage_id, task_id)
+#     except Exception as e:
+#         return jsonify({'error': f'创建上传路径失败: {str(e)}'}), 500
+#
+#     # 保存文件
+#     try:
+#         unique_filename = generate_unique_filename(absolute_path, file.filename)
+#         file_path = os.path.join(absolute_path, unique_filename)
+#         file.save(file_path)
+#         mime_type = get_mime_type(file.filename) or file.content_type
+#     except Exception as e:
+#         return jsonify({'error': f'保存文件失败: {str(e)}'}), 500
+#
+#     # 创建文件记录
+#     try:
+#         project_file = ProjectFile(
+#             project_id=project_id,
+#             stage_id=stage_id,
+#             task_id=task_id,
+#             original_name=file.filename,
+#             file_name=unique_filename,
+#             file_type=mime_type,
+#             file_path=os.path.join(relative_path, unique_filename),
+#             upload_user_id=employee_id,
+#             upload_date=datetime.now(),
+#             text_extracted=False,
+#             is_public=is_public  # 设置是否公开
+#         )
+#         db.session.add(project_file)
+#         db.session.commit()
+#
+#         # 创建文件索引
+#         try:
+#             file_path = os.path.join(current_app.root_path, project_file.file_path)
+#             if update_file_index(project_file.id, file_path, mime_type):
+#                 print(f"已成功为 file 创建文件索引 {project_file.id}")
+#             else:
+#                 print(f"无法为 file 创建文件索引 {project_file.id}")
+#         except Exception as e:
+#             print(f"创建文件索引时出错: {str(e)}")
+#
+#     except Exception as e:
+#         db.session.rollback()
+#         return jsonify({'error': f'数据库操作失败: {str(e)}'}), 500
+#
+#     return jsonify({'message': '文件上传成功', 'file_id': project_file.id})
+
+# 2025年3月17日14:52:24
+@files_bp.route('/<int:project_id>/subprojects/<int:subproject_id>/stages/<int:stage_id>/tasks/<int:task_id>/upload', methods=['POST'])
 @track_activity
-def upload_task_file(project_id, stage_id, task_id):
+def upload_task_file(project_id, subproject_id, stage_id, task_id):
     file = request.files.get('file')
     is_public = request.form.get('is_public', 'false').lower() == 'true'  # 获取是否公开的参数
 
     if not file:
         return jsonify({'error': '请提供文件'}), 400
 
-    # 验证任务、阶段和项目的关系
+    # 验证任务、阶段、子项目和项目的关系
     task = StageTask.query.get_or_404(task_id)
     stage = ProjectStage.query.get_or_404(stage_id)
+    subproject = Subproject.query.get_or_404(subproject_id)
 
-    if task.stage_id != stage_id or stage.project_id != project_id:
-        return jsonify({'error': '任务、阶段或项目信息不匹配'}), 400
+    # 验证关系链
+    if task.stage_id != stage_id or stage.subproject_id != subproject_id or subproject.project_id != project_id:
+        return jsonify({'error': '任务、阶段、子项目或项目信息不匹配'}), 400
 
     # 验证文件类型和大小
     if not allowed_file(file.filename):
@@ -278,7 +480,8 @@ def upload_task_file(project_id, stage_id, task_id):
     # 构建上传路径
     employee_id = get_employee_id()
     try:
-        relative_path, absolute_path = create_upload_path(employee_id, project_id, stage_id, task_id)
+        # 需要更新 create_upload_path 函数以支持子项目
+        relative_path, absolute_path = create_upload_path(employee_id, project_id, subproject_id, stage_id, task_id)
     except Exception as e:
         return jsonify({'error': f'创建上传路径失败: {str(e)}'}), 500
 
@@ -295,6 +498,7 @@ def upload_task_file(project_id, stage_id, task_id):
     try:
         project_file = ProjectFile(
             project_id=project_id,
+            subproject_id=subproject_id,  # 添加子项目ID
             stage_id=stage_id,
             task_id=task_id,
             original_name=file.filename,
@@ -327,7 +531,121 @@ def upload_task_file(project_id, stage_id, task_id):
 
 
 
+
+
 # 搜索功能，加权限展示，加公开属性
+# @files_bp.route('/search', methods=['GET'])
+# @track_activity
+# def search_files():
+#     try:
+#         # 获取当前用户 ID 和角色
+#         employee_id = get_employee_id()
+#         current_user = User.query.get(employee_id)
+#         if not current_user:
+#             return jsonify({'error': '未找到用户'}), 404
+#
+#         search_query = request.args.get('query', '').strip()
+#         visibility = request.args.get('visibility', '')  # 获取可见性筛选参数
+#
+#         if not search_query:
+#             return jsonify({'error': '搜索条件必填'}), 400
+#
+#         base_query = ProjectFile.query.options(
+#             joinedload(ProjectFile.project),
+#             joinedload(ProjectFile.stage),
+#             joinedload(ProjectFile.task),
+#             joinedload(ProjectFile.upload_user),
+#             joinedload(ProjectFile.content)
+#         )
+#
+#         # 修改权限筛选逻辑，加入可见性筛选
+#         if current_user.role != 1:  # 不是管理员
+#             if visibility == 'public':
+#                 base_query = base_query.filter(ProjectFile.is_public == True)
+#             elif visibility == 'private':
+#                 base_query = base_query.filter(
+#                     ProjectFile.upload_user_id == employee_id
+#                 )
+#             else:
+#                 base_query = base_query.filter(
+#                     or_(
+#                         ProjectFile.upload_user_id == employee_id,
+#                         ProjectFile.is_public == True
+#                     )
+#                 )
+#         else:  # 管理员可以看到所有文件，但仍然应用可见性筛选
+#             if visibility == 'public':
+#                 base_query = base_query.filter(ProjectFile.is_public == True)
+#             elif visibility == 'private':
+#                 base_query = base_query.filter(ProjectFile.is_public == False)
+#
+#         search_conditions = [
+#             ProjectFile.original_name.ilike(f'%{search_query}%'),
+#             ProjectFile.file_name.ilike(f'%{search_query}%'),
+#             ProjectFile.file_type.ilike(f'%{search_query}%'),
+#             ProjectFile.file_path.ilike(f'%{search_query}%'),
+#             Project.name.ilike(f'%{search_query}%'),
+#             ProjectStage.name.ilike(f'%{search_query}%'),
+#             StageTask.name.ilike(f'%{search_query}%'),
+#             User.username.ilike(f'%{search_query}%'),
+#             FileContent.content.ilike(f'%{search_query}%')
+#         ]
+#
+#         search_results = base_query \
+#             .join(Project) \
+#             .join(ProjectStage) \
+#             .join(StageTask) \
+#             .join(User, ProjectFile.upload_user_id == User.id) \
+#             .outerjoin(FileContent) \
+#             .filter(or_(*search_conditions)) \
+#             .all()
+#
+#         results = []
+#         for file in search_results:
+#             try:
+#                 file_path = os.path.join(current_app.root_path, file.file_path)
+#                 file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+#
+#                 result = {
+#                     'id': file.id,
+#                     'fileName': file.file_name,
+#                     'originalName': highlight_text(file.original_name, search_query),
+#                     'fileType': file.file_type,
+#                     'fileSize': file_size,
+#                     'uploadTime': file.upload_date.isoformat(),
+#                     'uploader': highlight_text(file.upload_user.username, search_query),
+#                     'projectName': highlight_text(file.project.name if file.project else None, search_query),
+#                     'stageName': highlight_text(file.stage.name if file.stage else None, search_query),
+#                     'taskName': highlight_text(file.task.name if file.task else None, search_query),
+#                     'is_public': file.is_public  # 添加可见性字段
+#                 }
+#
+#                 # 添加内容预览
+#                 if file.content:
+#                     preview = get_content_preview(
+#                         file.content.content,
+#                         search_query,
+#                         context_length=150
+#                     )
+#                     result['contentPreview'] = preview if preview else "无匹配内容"
+#                 else:
+#                     result['contentPreview'] = "未提取内容"
+#
+#                 results.append(result)
+#             except Exception as e:
+#                 print(f"处理文件 {file.id} 时出错: {str(e)}")
+#                 continue
+#
+#         return jsonify({
+#             'results': results,
+#             'total': len(results)
+#         })
+#
+#     except Exception as e:
+#         print(f"搜索错误: {str(e)}")
+#         return jsonify({'error': str(e)}), 500
+
+# 2025年3月17日14:55:30
 @files_bp.route('/search', methods=['GET'])
 @track_activity
 def search_files():
@@ -340,19 +658,25 @@ def search_files():
 
         search_query = request.args.get('query', '').strip()
         visibility = request.args.get('visibility', '')  # 获取可见性筛选参数
+        subproject_id = request.args.get('subproject_id', type=int)  # 获取子项目筛选参数
 
         if not search_query:
             return jsonify({'error': '搜索条件必填'}), 400
 
         base_query = ProjectFile.query.options(
             joinedload(ProjectFile.project),
+            joinedload(ProjectFile.subproject),  # 添加子项目关联
             joinedload(ProjectFile.stage),
             joinedload(ProjectFile.task),
             joinedload(ProjectFile.upload_user),
             joinedload(ProjectFile.content)
         )
 
-        # 修改权限筛选逻辑，加入可见性筛选
+        # 子项目筛选
+        if subproject_id:
+            base_query = base_query.filter(ProjectFile.subproject_id == subproject_id)
+
+        # 权限和可见性筛选逻辑保持不变
         if current_user.role != 1:  # 不是管理员
             if visibility == 'public':
                 base_query = base_query.filter(ProjectFile.is_public == True)
@@ -373,12 +697,14 @@ def search_files():
             elif visibility == 'private':
                 base_query = base_query.filter(ProjectFile.is_public == False)
 
+        # 添加子项目到搜索条件
         search_conditions = [
             ProjectFile.original_name.ilike(f'%{search_query}%'),
             ProjectFile.file_name.ilike(f'%{search_query}%'),
             ProjectFile.file_type.ilike(f'%{search_query}%'),
             ProjectFile.file_path.ilike(f'%{search_query}%'),
             Project.name.ilike(f'%{search_query}%'),
+            Subproject.name.ilike(f'%{search_query}%'),  # 添加子项目名称搜索
             ProjectStage.name.ilike(f'%{search_query}%'),
             StageTask.name.ilike(f'%{search_query}%'),
             User.username.ilike(f'%{search_query}%'),
@@ -387,6 +713,7 @@ def search_files():
 
         search_results = base_query \
             .join(Project) \
+            .join(Subproject) \
             .join(ProjectStage) \
             .join(StageTask) \
             .join(User, ProjectFile.upload_user_id == User.id) \
@@ -409,9 +736,10 @@ def search_files():
                     'uploadTime': file.upload_date.isoformat(),
                     'uploader': highlight_text(file.upload_user.username, search_query),
                     'projectName': highlight_text(file.project.name if file.project else None, search_query),
+                    'subprojectName': highlight_text(file.subproject.name if file.subproject else None, search_query),  # 添加子项目名称
                     'stageName': highlight_text(file.stage.name if file.stage else None, search_query),
                     'taskName': highlight_text(file.task.name if file.task else None, search_query),
-                    'is_public': file.is_public  # 添加可见性字段
+                    'is_public': file.is_public
                 }
 
                 # 添加内容预览
@@ -438,6 +766,8 @@ def search_files():
     except Exception as e:
         print(f"搜索错误: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
 
 
 

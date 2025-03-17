@@ -8,7 +8,8 @@ from flask import Blueprint, request, jsonify
 from flask_cors import CORS
 
 from config import app
-from models import db, Project, ProjectFile, ProjectUpdate, ProjectStage, User, ReportClockinDetail, ReportClockin, \
+from models import db, Project, Subproject, ProjectFile, ProjectUpdate, ProjectStage, User, ReportClockinDetail, \
+    ReportClockin, \
     StageTask, TaskProgressUpdate, EditTimeTracking
 from auth import get_employee_id
 from routes.filemanagement import allowed_file, MAX_FILE_SIZE, generate_unique_filename, create_upload_path
@@ -25,7 +26,100 @@ def get_employee_id():
     return data['user_id']
 
 
-# 工程查看和编辑路线
+# 项目概览统计接口
+@employee_bp.route('/projets/dashboard', methods=['GET'])
+@track_activity
+def get_projects_dashboard(current_user):
+    employee_id = current_user.id
+
+    # 获取分配给该员工的所有项目
+    projects = Project.query.filter_by(employee_id=employee_id).all()
+
+    # 计算统计数据
+    total_projects = len(projects)
+    completed_projects = sum(1 for p in projects if p.status == 'completed')
+    in_progress_projects = sum(1 for p in projects if p.status == 'in_progress')
+    pending_projects = sum(1 for p in projects if p.status == 'pending')
+
+    # 统计子项目数据
+    total_subprojects = 0
+    completed_subprojects = 0
+    in_progress_subprojects = 0
+    pending_subprojects = 0
+
+    for project in projects:
+        total_subprojects += len(project.subprojects)
+        completed_subprojects += sum(1 for sp in project.subprojects if sp.status == 'completed')
+        in_progress_subprojects += sum(1 for sp in project.subprojects if sp.status == 'in_progress')
+        pending_subprojects += sum(1 for sp in project.subprojects if sp.status == 'pending')
+
+    # 计算即将到期和已逾期的项目
+    today = datetime.now().date()
+    upcoming_deadlines = []
+    overdue_projects = []
+
+    for project in projects:
+        if project.status != 'completed':
+            if project.deadline.date() < today:
+                overdue_projects.append({
+                    'id': project.id,
+                    'name': project.name,
+                    'deadline': project.deadline.strftime('%Y-%m-%d'),
+                    'days_overdue': (today - project.deadline.date()).days,
+                    'type': 'project'
+                })
+            elif (project.deadline.date() - today).days <= 7:
+                upcoming_deadlines.append({
+                    'id': project.id,
+                    'name': project.name,
+                    'deadline': project.deadline.strftime('%Y-%m-%d'),
+                    'days_remaining': (project.deadline.date() - today).days,
+                    'type': 'project'
+                })
+
+        # 检查子项目截止日期
+        for subproject in project.subprojects:
+            if subproject.status != 'completed':
+                if subproject.deadline.date() < today:
+                    overdue_projects.append({
+                        'id': subproject.id,
+                        'project_id': project.id,
+                        'name': subproject.name,
+                        'deadline': subproject.deadline.strftime('%Y-%m-%d'),
+                        'days_overdue': (today - subproject.deadline.date()).days,
+                        'type': 'subproject'
+                    })
+                elif (subproject.deadline.date() - today).days <= 7:
+                    upcoming_deadlines.append({
+                        'id': subproject.id,
+                        'project_id': project.id,
+                        'name': subproject.name,
+                        'deadline': subproject.deadline.strftime('%Y-%m-%d'),
+                        'days_remaining': (subproject.deadline.date() - today).days,
+                        'type': 'subproject'
+                    })
+
+    return jsonify({
+        'projects': {
+            'total': total_projects,
+            'completed': completed_projects,
+            'in_progress': in_progress_projects,
+            'pending': pending_projects
+        },
+        'subprojects': {
+            'total': total_subprojects,
+            'completed': completed_subprojects,
+            'in_progress': in_progress_subprojects,
+            'pending': pending_subprojects
+        },
+        'deadlines': {
+            'upcoming': upcoming_deadlines,
+            'overdue': overdue_projects
+        }
+    })
+
+
+# 工程查看和编辑路线 - 更新以包含子项目
 @employee_bp.route('/projects', methods=['GET'])
 @track_activity
 def get_assigned_projects():
@@ -40,29 +134,82 @@ def get_assigned_projects():
         'deadline': p.deadline.strftime('%Y-%m-%d'),
         'progress': p.progress,
         'status': p.status,
-        'stages': [{
-            'id': s.id,
-            'name': s.name,
-            'description': s.description,
-            'start_date': s.start_date.strftime('%Y-%m-%d'),
-            'end_date': s.end_date.strftime('%Y-%m-%d'),
-            'progress': s.progress,
-            'status': s.status,
-            'tasks': [{
-                'id': t.id,
-                'name': t.name,
-                'description': t.description,
-                'due_date': t.due_date.strftime('%Y-%m-%d'),
-                'status': t.status,
-                'progress': t.progress,
-                'files': [{
-                    'id': f.id is not None,  # 检查文件是否有 ID
-                    # 如果没做索引，content为空，却有文件，那么前端就会判断错误没有文件，所以前端按照是否有 ID 来判断是否有文件
-                    'has_content': f.content is not None  # 检查文件是否有内容
-                } for f in t.files]
-            } for t in s.tasks]
-        } for s in p.stages]
+        'subprojects': [{
+            'id': sp.id,
+            'name': sp.name,
+            'description': sp.description,
+            'start_date': sp.start_date.strftime('%Y-%m-%d'),
+            'deadline': sp.deadline.strftime('%Y-%m-%d'),
+            'progress': sp.progress,
+            'status': sp.status,
+            'stages': [{
+                'id': s.id,
+                'name': s.name,
+                'description': s.description,
+                'start_date': s.start_date.strftime('%Y-%m-%d'),
+                'end_date': s.end_date.strftime('%Y-%m-%d'),
+                'progress': s.progress,
+                'status': s.status,
+                'tasks': [{
+                    'id': t.id,
+                    'name': t.name,
+                    'description': t.description,
+                    'due_date': t.due_date.strftime('%Y-%m-%d'),
+                    'status': t.status,
+                    'progress': t.progress,
+                    'files': [{
+                        'id': f.id is not None,  # 检查文件是否有 ID
+                        # 如果没做索引，content为空，却有文件，那么前端就会判断错误没有文件，所以前端按照是否有 ID 来判断是否有文件
+                        'has_content': f.content is not None  # 检查文件是否有内容
+                    } for f in t.files]
+                } for t in s.tasks]
+            } for s in sp.stages]
+        } for sp in p.subprojects]
     } for p in projects])
+
+
+# 获取特定项目的详细信息，包括子项目层次结构
+@employee_bp.route('/projects/<int:project_id>', methods=['GET'])
+@track_activity
+def get_project_details(project_id):
+    project = Project.query.get_or_404(project_id)
+
+    return jsonify({
+        'id': project.id,
+        'name': project.name,
+        'description': project.description,
+        'start_date': project.start_date.strftime('%Y-%m-%d'),
+        'deadline': project.deadline.strftime('%Y-%m-%d'),
+        'progress': project.progress,
+        'status': project.status,
+        'employee_id': project.employee_id,
+        'subprojects': [{
+            'id': sp.id,
+            'name': sp.name,
+            'description': sp.description,
+            'start_date': sp.start_date.strftime('%Y-%m-%d'),
+            'deadline': sp.deadline.strftime('%Y-%m-%d'),
+            'progress': sp.progress,
+            'status': sp.status,
+            'stages': [{
+                'id': s.id,
+                'name': s.name,
+                'description': s.description,
+                'start_date': s.start_date.strftime('%Y-%m-%d'),
+                'end_date': s.end_date.strftime('%Y-%m-%d'),
+                'progress': s.progress,
+                'status': s.status,
+                'tasks': [{
+                    'id': t.id,
+                    'name': t.name,
+                    'description': t.description,
+                    'due_date': t.due_date.strftime('%Y-%m-%d'),
+                    'status': t.status,
+                    'progress': t.progress
+                } for t in s.tasks]
+            } for s in sp.stages]
+        } for sp in project.subprojects]
+    })
 
 
 @employee_bp.route('/projects/<int:project_id>', methods=['PUT'])
@@ -81,36 +228,154 @@ def update_project(project_id):
         # 这样可以防止通过这个接口将已完成的项目重新设为进行中
         if data['status'] != 'completed' or project.status != 'completed':
             project.status = data['status']
+    if 'name' in data:
+        project.name = data['name']
+    if 'description' in data:
+        project.description = data['description']
 
     db.session.commit()
 
     return jsonify({'message': '项目更新成功'})
 
 
-# 进度跟踪
+# 子项目相关接口
+@employee_bp.route('/subprojects/<int:subproject_id>', methods=['GET'])
+@track_activity
+def get_subproject_details(subproject_id):
+    subproject = Subproject.query.get_or_404(subproject_id)
+
+    return jsonify({
+        'id': subproject.id,
+        'name': subproject.name,
+        'description': subproject.description,
+        'project_id': subproject.project_id,
+        'start_date': subproject.start_date.strftime('%Y-%m-%d'),
+        'deadline': subproject.deadline.strftime('%Y-%m-%d'),
+        'progress': subproject.progress,
+        'status': subproject.status,
+        'stages': [{
+            'id': s.id,
+            'name': s.name,
+            'description': s.description,
+            'start_date': s.start_date.strftime('%Y-%m-%d'),
+            'end_date': s.end_date.strftime('%Y-%m-%d'),
+            'progress': s.progress,
+            'status': s.status,
+            'tasks': [{
+                'id': t.id,
+                'name': t.name,
+                'description': t.description,
+                'due_date': t.due_date.strftime('%Y-%m-%d'),
+                'status': t.status,
+                'progress': t.progress
+            } for t in s.tasks]
+        } for s in subproject.stages]
+    })
+
+
+@employee_bp.route('/subprojects/<int:subproject_id>', methods=['PUT'])
+@track_activity
+def update_subproject(subproject_id):
+    subproject = Subproject.query.get_or_404(subproject_id)
+    data = request.get_json()
+
+    # 更新子项目信息
+    if 'name' in data:
+        subproject.name = data['name']
+    if 'description' in data:
+        subproject.description = data['description']
+    if 'start_date' in data:
+        subproject.start_date = datetime.strptime(data['start_date'], '%Y-%m-%d')
+    if 'deadline' in data:
+        subproject.deadline = datetime.strptime(data['deadline'], '%Y-%m-%d')
+    if 'status' in data:
+        subproject.status = data['status']
+    if 'progress' in data:
+        subproject.progress = data['progress']
+
+    db.session.commit()
+
+    return jsonify({'message': '子项目更新成功'})
+
+
+# 进度跟踪 - 更新为支持子项目层次结构
 @employee_bp.route('/projects/<int:project_id>/progress', methods=['PUT'])
 @track_activity
 def update_progress(project_id):
     project = Project.query.get_or_404(project_id)
     data = request.get_json()
     project.progress = data['progress']
+
+    # 更新进度时创建进度更新记录
+    new_update = ProjectUpdate(
+        project_id=project_id,
+        progress=data['progress'],
+        description=data.get('description', '项目进度更新'),
+        created_at=datetime.now(),
+        type='progress'
+    )
+    db.session.add(new_update)
+
     db.session.commit()
     return jsonify({'message': '已成功更新进度'})
 
 
-# 获取项目进度以供显示
+@employee_bp.route('/subprojects/<int:subproject_id>/progress', methods=['PUT'])
+@track_activity
+def update_subproject_progress(subproject_id):
+    subproject = Subproject.query.get_or_404(subproject_id)
+    data = request.get_json()
+    subproject.progress = data['progress']
+
+    # 更新父项目的进度
+    # 父项目的进度基于所有子项目的平均进度
+    project = Project.query.get(subproject.project_id)
+    if project and project.subprojects:
+        total_progress = sum(sp.progress for sp in project.subprojects)
+        project.progress = total_progress / len(project.subprojects)
+
+    db.session.commit()
+    return jsonify({'message': '已成功更新子项目进度'})
+
+
+# 获取项目进度以供显示 - 更新为支持子项目
 @employee_bp.route('/projects/<int:project_id>/timeline', methods=['GET'])
 @track_activity
 def get_project_timeline(project_id):
     project = Project.query.get_or_404(project_id)
+
+    # 获取项目所有子项目的时间线信息
+    subprojects_timelines = [{
+        'id': sp.id,
+        'name': sp.name,
+        'start_date': sp.start_date.strftime('%Y-%m-%d'),
+        'deadline': sp.deadline.strftime('%Y-%m-%d'),
+        'progress': sp.progress,
+        'status': sp.status,
+        'stages': [{
+            'id': s.id,
+            'name': s.name,
+            'start_date': s.start_date.strftime('%Y-%m-%d'),
+            'end_date': s.end_date.strftime('%Y-%m-%d'),
+            'progress': s.progress,
+            'status': s.status
+        } for s in sp.stages]
+    } for sp in project.subprojects]
+
     return jsonify({
-        'start_date': project.start_date.strftime('%Y-%m-%d'),
-        'deadline': project.deadline.strftime('%Y-%m-%d'),
-        'progress': project.progress
+        'project': {
+            'id': project.id,
+            'name': project.name,
+            'start_date': project.start_date.strftime('%Y-%m-%d'),
+            'deadline': project.deadline.strftime('%Y-%m-%d'),
+            'progress': project.progress,
+            'status': project.status
+        },
+        'subprojects': subprojects_timelines
     })
 
 
-# 截止日期提醒
+# 截止日期提醒 - 更新以包括子项目
 @employee_bp.route('/projects/reminders', methods=['GET'])
 @track_activity
 def get_reminders():
@@ -118,22 +383,54 @@ def get_reminders():
     projects = Project.query.filter_by(employee_id=employee_id).all()
     reminders = []
 
+    today = datetime.now().date()
+
+    # 项目级别的提醒
     for project in projects:
-        if project.deadline and project.deadline.date() < datetime.now().date():
+        if project.deadline and project.deadline.date() < today:
             reminders.append({
                 'project_id': project.id,
-                'message': f'Project {project.name} is past the deadline!'
+                'project_name': project.name,
+                'type': 'project',
+                'message': f'项目 {project.name} 已经超过截止日期！',
+                'days_overdue': (today - project.deadline.date()).days
             })
-        elif project.deadline and (project.deadline - datetime.now()).days < 7:
+        elif project.deadline and (project.deadline.date() - today).days < 7:
             reminders.append({
                 'project_id': project.id,
-                'message': f'Project {project.name} is approaching the deadline!'
+                'project_name': project.name,
+                'type': 'project',
+                'message': f'项目 {project.name} 即将到期！',
+                'days_remaining': (project.deadline.date() - today).days
             })
+
+        # 子项目级别的提醒
+        for subproject in project.subprojects:
+            if subproject.deadline and subproject.deadline.date() < today:
+                reminders.append({
+                    'project_id': project.id,
+                    'project_name': project.name,
+                    'subproject_id': subproject.id,
+                    'subproject_name': subproject.name,
+                    'type': 'subproject',
+                    'message': f'子项目 {subproject.name} 已经超过截止日期！',
+                    'days_overdue': (today - subproject.deadline.date()).days
+                })
+            elif subproject.deadline and (subproject.deadline.date() - today).days < 7:
+                reminders.append({
+                    'project_id': project.id,
+                    'project_name': project.name,
+                    'subproject_id': subproject.id,
+                    'subproject_name': subproject.name,
+                    'type': 'subproject',
+                    'message': f'子项目 {subproject.name} 即将到期！',
+                    'days_remaining': (subproject.deadline.date() - today).days
+                })
 
     return jsonify(reminders)
 
 
-# 获取项目更新
+# 获取项目更新 - 保持不变
 @employee_bp.route('/projects/<int:project_id>/updates', methods=['GET'])
 @track_activity
 def get_project_updates(project_id):
@@ -155,7 +452,7 @@ def get_project_updates(project_id):
         return jsonify({'error': str(e)}), 500
 
 
-# 更新项目进度
+# 更新项目进度 - 更新为支持子项目
 @employee_bp.route('/projects/<int:project_id>/progress', methods=['POST'])
 @track_activity
 def update_project_progress(project_id):
@@ -185,41 +482,7 @@ def update_project_progress(project_id):
     })
 
 
-# ---------------------------------
-
-
-# 从登录信息获取用户信息
-# Token 验证装饰器
-# def token_required(f):
-#     @wraps(f)
-#     def decorated(*args, **kwargs):
-#         token = None
-#         # 从请求头中获取 token
-#         if 'Authorization' in request.headers:
-#             auth_header = request.headers['Authorization']
-#             try:
-#                 token = auth_header.split(" ")[1]  # Bearer <token>
-#             except IndexError:
-#                 return jsonify({'message': '无效的token格式'}), 401
-#
-#         if not token:
-#             return jsonify({'message': 'token缺失'}), 401
-#
-#         try:
-#             # 验证 token
-#             data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
-#             current_user = User.query.filter_by(id=data['user_id']).first()
-#             if not current_user:
-#                 return jsonify({'message': '用户不存在'}), 401
-#         except jwt.ExpiredSignatureError:
-#             return jsonify({'message': 'token已过期'}), 401
-#         except jwt.InvalidTokenError:
-#             return jsonify({'message': '无效的token'}), 401
-#
-#         return f(current_user, *args, **kwargs)
-#
-#     return decorated
-
+# Token 验证装饰器 - 保持不变
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -256,8 +519,7 @@ def token_required(f):
     return decorated
 
 
-
-# 获取用户个人信息接口
+# 获取用户个人信息接口 - 保持不变
 @employee_bp.route('/profile', methods=['GET'])
 @track_activity
 @token_required
@@ -270,7 +532,7 @@ def get_profile(current_user):
     }), 200
 
 
-# 后端接口 - 添加检查当月是否已填报的接口
+# 后端接口 - 添加检查当月是否已填报的接口 - 保持不变
 @employee_bp.route('/check-monthly-report', methods=['GET'])
 @track_activity
 @token_required
@@ -282,7 +544,7 @@ def check_monthly_report(current_user):
     })
 
 
-# 修改提交接口，添加验证
+# 修改提交接口，添加验证 - 保持不变
 @employee_bp.route('/fill-card', methods=['POST'])
 @track_activity
 @token_required
@@ -348,8 +610,7 @@ def report_clock_in(current_user):
         return jsonify({'error': str(e)}), 500
 
 
-# 获取补卡记录
-
+# 获取补卡记录 - 保持不变
 @employee_bp.route('/report-data', methods=['GET'])
 @track_activity
 @token_required
@@ -384,8 +645,7 @@ def get_report_data(current_user):
     })
 
 
-
-# 创建任务进度更新
+# 创建任务进度更新 - 更新以添加更多关联字段
 @employee_bp.route('/tasks/<int:task_id>/progress-updates', methods=['POST'])
 @track_activity
 def add_task_progress_update(task_id):
@@ -414,10 +674,73 @@ def add_task_progress_update(task_id):
     db.session.add(update)
     db.session.commit()
 
+    # 更新关联的阶段进度
+    # 计算阶段的进度
+    stage = ProjectStage.query.get(task.stage_id)
+    if stage and stage.tasks:
+        total_progress = sum(t.progress for t in stage.tasks)
+        stage.progress = total_progress / len(stage.tasks)
+
+        # 如果所有任务已完成，则阶段也标记为已完成
+        if all(t.status == 'completed' for t in stage.tasks):
+            stage.status = 'completed'
+        elif any(t.status == 'in_progress' for t in stage.tasks):
+            stage.status = 'in_progress'
+
+        db.session.commit()
+
+        # 更新子项目进度
+        if stage.subproject_id:
+            subproject = Subproject.query.get(stage.subproject_id)
+            if subproject and subproject.stages:
+                total_progress = sum(s.progress for s in subproject.stages)
+                subproject.progress = total_progress / len(subproject.stages)
+
+                # 更新子项目状态
+                if all(s.status == 'completed' for s in subproject.stages):
+                    subproject.status = 'completed'
+                elif any(s.status == 'in_progress' for s in subproject.stages):
+                    subproject.status = 'in_progress'
+
+                db.session.commit()
+
+                # 更新父项目进度
+                project = Project.query.get(subproject.project_id)
+                if project and project.subprojects:
+                    total_progress = sum(sp.progress for sp in project.subprojects)
+                    project.progress = total_progress / len(project.subprojects)
+                    db.session.commit()
+
     return jsonify({'message': '任务进度更新成功'})
 
 
-# 获取任务的进度更新记录
+# 获取特定子项目下的所有任务
+@employee_bp.route('/subprojects/<int:subproject_id>/tasks', methods=['GET'])
+@track_activity
+def get_subproject_tasks(subproject_id):
+    # 通过子项目ID获取所有关联的阶段
+    stages = ProjectStage.query.filter_by(subproject_id=subproject_id).all()
+
+    # 收集所有阶段的任务
+    all_tasks = []
+    for stage in stages:
+        tasks = StageTask.query.filter_by(stage_id=stage.id).all()
+        for task in tasks:
+            all_tasks.append({
+                'id': task.id,
+                'name': task.name,
+                'description': task.description,
+                'due_date': task.due_date.strftime('%Y-%m-%d'),
+                'status': task.status,
+                'progress': task.progress,
+                'stage_id': stage.id,
+                'stage_name': stage.name
+            })
+
+    return jsonify(all_tasks)
+
+
+# 获取任务的进度更新记录 - 保持不变
 @employee_bp.route('/tasks/<int:task_id>/progress-updates', methods=['GET'])
 @track_activity
 def get_task_progress_updates(task_id):
@@ -432,7 +755,7 @@ def get_task_progress_updates(task_id):
     } for update in updates])
 
 
-# 检测任务编辑时间
+# 检测任务编辑时间 - 保持不变
 @employee_bp.route('/tasks/<int:task_id>/edit-time', methods=['GET'])
 @track_activity
 @token_required  # 确保使用身份验证装饰器
@@ -470,7 +793,7 @@ def get_task_edit_time(current_user, task_id):
         return jsonify({'error': str(e)}), 500
 
 
-# 获取阶段编辑时间
+# 获取阶段编辑时间 - 保持不变
 @employee_bp.route('/stages/<int:stage_id>/edit-time', methods=['GET'])
 @track_activity
 @token_required
@@ -503,7 +826,40 @@ def get_stage_edit_time(current_user, stage_id):
         return jsonify({'error': str(e)}), 500
 
 
-# 获取项目总编辑时间
+# 获取子项目编辑时间
+@employee_bp.route('/subprojects/<int:subproject_id>/edit-time', methods=['GET'])
+@track_activity
+@token_required
+def get_subproject_edit_time(current_user, subproject_id):
+    try:
+        # 获取此子项目的所有编辑时间记录
+        edit_records = EditTimeTracking.query.filter_by(
+            subproject_id=subproject_id,
+            edit_type='subproject'
+        ).all()
+
+        total_duration = sum(record.duration for record in edit_records)
+
+        edit_history = [{
+            'start_time': record.start_time.isoformat(),
+            'end_time': record.end_time.isoformat(),
+            'duration': record.duration,
+            'user_id': record.user_id
+        } for record in edit_records]
+
+        return jsonify({
+            'subproject_id': subproject_id,
+            'duration': total_duration,
+            'edit_history': edit_history,
+            'edit_count': len(edit_records)
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# 获取项目总编辑时间 - 更新以包含子项目
 @employee_bp.route('/projects/<int:project_id>/total-edit-time', methods=['GET'])
 @track_activity
 @token_required
@@ -517,7 +873,8 @@ def get_project_total_edit_time(current_user, project_id):
         # 计算不同类型的总计
         task_duration = sum(record.duration for record in edit_records if record.edit_type == 'task')
         stage_duration = sum(record.duration for record in edit_records if record.edit_type == 'stage')
-        total_duration = task_duration + stage_duration
+        subproject_duration = sum(record.duration for record in edit_records if record.edit_type == 'subproject')
+        total_duration = task_duration + stage_duration + subproject_duration
 
         # 获取每个用户的统计数据
         user_stats = {}
@@ -531,6 +888,7 @@ def get_project_total_edit_time(current_user, project_id):
             'total_duration': total_duration,
             'task_duration': task_duration,
             'stage_duration': stage_duration,
+            'subproject_duration': subproject_duration,
             'user_stats': user_stats,
             'edit_count': len(edit_records)
         })
@@ -540,7 +898,7 @@ def get_project_total_edit_time(current_user, project_id):
         return jsonify({'error': str(e)}), 500
 
 
-# 用于计算编辑时间统计信息
+# 用于计算编辑时间统计信息 - 保持不变
 def calculate_edit_stats(records):
     if not records:
         return {
@@ -563,7 +921,162 @@ def calculate_edit_stats(records):
     }
 
 
-# 修改密码
+# 搜索与过滤功能
+@employee_bp.route('/search', methods=['GET'])
+@track_activity
+@token_required
+def search_resources(current_user):
+    query = request.args.get('q', '')
+    resource_type = request.args.get('type', 'all')
+    status = request.args.get('status', '')
+
+    results = {
+        'projects': [],
+        'subprojects': [],
+        'stages': [],
+        'tasks': [],
+        'files': []
+    }
+
+    # 搜索项目
+    if resource_type in ['all', 'projects']:
+        projects_query = Project.query
+
+        if query:
+            projects_query = projects_query.filter(Project.name.like(f'%{query}%') |
+                                                   Project.description.like(f'%{query}%'))
+
+        if status:
+            projects_query = projects_query.filter(Project.status == status)
+
+        # 只返回当前员工负责的项目
+        projects_query = projects_query.filter(Project.employee_id == current_user.id)
+
+        projects = projects_query.all()
+        results['projects'] = [{
+            'id': p.id,
+            'name': p.name,
+            'description': p.description,
+            'status': p.status,
+            'progress': p.progress,
+            'deadline': p.deadline.strftime('%Y-%m-%d'),
+            'type': 'project'
+        } for p in projects]
+
+    # 搜索子项目
+    if resource_type in ['all', 'subprojects']:
+        # 获取当前用户负责的所有项目
+        user_projects = Project.query.filter_by(employee_id=current_user.id).all()
+        project_ids = [p.id for p in user_projects]
+
+        subprojects_query = Subproject.query.filter(Subproject.project_id.in_(project_ids))
+
+        if query:
+            subprojects_query = subprojects_query.filter(Subproject.name.like(f'%{query}%') |
+                                                         Subproject.description.like(f'%{query}%'))
+
+        if status:
+            subprojects_query = subprojects_query.filter(Subproject.status == status)
+
+        subprojects = subprojects_query.all()
+        results['subprojects'] = [{
+            'id': sp.id,
+            'name': sp.name,
+            'description': sp.description,
+            'status': sp.status,
+            'progress': sp.progress,
+            'deadline': sp.deadline.strftime('%Y-%m-%d'),
+            'project_id': sp.project_id,
+            'type': 'subproject'
+        } for sp in subprojects]
+
+    # 只在查询不为空时搜索任务和阶段，以避免返回太多结果
+    if query and resource_type in ['all', 'tasks', 'stages']:
+        # 获取用户负责的项目相关的所有子项目ID
+        user_projects = Project.query.filter_by(employee_id=current_user.id).all()
+        project_ids = [p.id for p in user_projects]
+
+        # 获取这些项目下所有子项目的ID
+        subprojects = Subproject.query.filter(Subproject.project_id.in_(project_ids)).all()
+        subproject_ids = [sp.id for sp in subprojects]
+
+        # 获取这些子项目下的所有阶段
+        if resource_type in ['all', 'stages']:
+            stages_query = ProjectStage.query.filter(ProjectStage.subproject_id.in_(subproject_ids))
+
+            if query:
+                stages_query = stages_query.filter(ProjectStage.name.like(f'%{query}%') |
+                                                   ProjectStage.description.like(f'%{query}%'))
+
+            if status:
+                stages_query = stages_query.filter(ProjectStage.status == status)
+
+            stages = stages_query.all()
+            results['stages'] = [{
+                'id': s.id,
+                'name': s.name,
+                'description': s.description,
+                'status': s.status,
+                'progress': s.progress,
+                'subproject_id': s.subproject_id,
+                'project_id': s.project_id,
+                'type': 'stage'
+            } for s in stages]
+
+        # 搜索任务
+        if resource_type in ['all', 'tasks']:
+            # 获取所有相关阶段的ID
+            stages = ProjectStage.query.filter(ProjectStage.subproject_id.in_(subproject_ids)).all()
+            stage_ids = [s.id for s in stages]
+
+            tasks_query = StageTask.query.filter(StageTask.stage_id.in_(stage_ids))
+
+            if query:
+                tasks_query = tasks_query.filter(StageTask.name.like(f'%{query}%') |
+                                                 StageTask.description.like(f'%{query}%'))
+
+            if status:
+                tasks_query = tasks_query.filter(StageTask.status == status)
+
+            tasks = tasks_query.all()
+            results['tasks'] = [{
+                'id': t.id,
+                'name': t.name,
+                'description': t.description,
+                'status': t.status,
+                'progress': t.progress,
+                'due_date': t.due_date.strftime('%Y-%m-%d'),
+                'stage_id': t.stage_id,
+                'type': 'task'
+            } for t in tasks]
+
+    # 搜索文件
+    if resource_type in ['all', 'files'] and query:
+        # 获取用户负责的项目的ID
+        user_projects = Project.query.filter_by(employee_id=current_user.id).all()
+        project_ids = [p.id for p in user_projects]
+
+        files_query = ProjectFile.query.filter(ProjectFile.project_id.in_(project_ids))
+
+        files_query = files_query.filter(ProjectFile.original_name.like(f'%{query}%'))
+
+        files = files_query.all()
+        results['files'] = [{
+            'id': f.id,
+            'name': f.original_name,
+            'file_type': f.file_type,
+            'upload_date': f.upload_date.strftime('%Y-%m-%d'),
+            'project_id': f.project_id,
+            'subproject_id': f.subproject_id,
+            'stage_id': f.stage_id,
+            'task_id': f.task_id,
+            'type': 'file'
+        } for f in files]
+
+    return jsonify(results)
+
+
+# 修改密码 - 保持不变
 @employee_bp.route('/change-password', methods=['POST'])
 @track_activity
 @token_required
@@ -596,7 +1109,7 @@ def change_user_password(current_user):
         log_user_activity(
             user_id=current_user.id,
             action_type='change_password',
-            action_detail=f'{current_user}修改密码为新密码{new_password}',
+            action_detail=f'用户修改了密码',
             resource_type='user',
             resource_id=current_user.id
         )

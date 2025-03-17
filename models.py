@@ -42,11 +42,51 @@ class Project(db.Model):
     # employee = db.relationship('User', backref='projects')
     employee = db.relationship('User', backref=db.backref('projects', passive_deletes=True))
     files = db.relationship('ProjectFile', back_populates='project', lazy=True)
+    # stages = db.relationship('ProjectStage', back_populates='project', lazy=True)
     stages = db.relationship('ProjectStage', back_populates='project', lazy=True)
     updates = db.relationship('ProjectUpdate', back_populates='project')
 
+# 2025年3月17日14:15:37
+# 子项目表
+class Subproject(db.Model):
+    __tablename__ = 'subprojects'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text)
+    project_id = db.Column(db.Integer, db.ForeignKey('projects.id', ondelete='CASCADE'), nullable=False)
+    start_date = db.Column(db.DateTime, default=datetime.now)
+    deadline = db.Column(db.DateTime, nullable=False)
+    progress = db.Column(db.Float, default=0.0)  # 0-100
+    status = db.Column(db.String(20), default='pending')  # 待处理、正在干、已完成
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    # 关系
+    project = db.relationship('Project', backref=db.backref('subprojects', lazy=True, cascade='all, delete-orphan'))
+    stages = db.relationship('ProjectStage', back_populates='subproject', lazy=True, cascade='all, delete-orphan')
+
+
 
 # 项目阶段表
+
+# class ProjectStage(db.Model):
+#     __tablename__ = 'project_stages'
+#
+#     id = db.Column(db.Integer, primary_key=True)
+#     name = db.Column(db.String(50), nullable=False)
+#     description = db.Column(db.String(200), nullable=False)
+#     start_date = db.Column(db.Date, nullable=False)
+#     end_date = db.Column(db.Date, nullable=False)
+#     progress = db.Column(db.Integer, nullable=False)
+#     status = db.Column(db.String(20), nullable=False)
+#     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
+#
+#     # 关系
+#     project = db.relationship('Project', back_populates='stages')
+#     stage_files = db.relationship('ProjectFile', back_populates='stage', lazy=True)  # 修改为 stage_files
+#     tasks = db.relationship('StageTask', back_populates='stage', lazy=True)
+
 
 class ProjectStage(db.Model):
     __tablename__ = 'project_stages'
@@ -58,13 +98,16 @@ class ProjectStage(db.Model):
     end_date = db.Column(db.Date, nullable=False)
     progress = db.Column(db.Integer, nullable=False)
     status = db.Column(db.String(20), nullable=False)
+    subproject_id = db.Column(db.Integer, db.ForeignKey('subprojects.id', ondelete='CASCADE'), nullable=False)
+    # 保留 project_id 以实现向后兼容性或快速查找
     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
 
     # 关系
+    # project = db.relationship('Project', backref=db.backref('stages', passive_deletes=True))
     project = db.relationship('Project', back_populates='stages')
-    stage_files = db.relationship('ProjectFile', back_populates='stage', lazy=True)  # 修改为 stage_files
-    tasks = db.relationship('StageTask', back_populates='stage', lazy=True)
-
+    subproject = db.relationship('Subproject', back_populates='stages')
+    stage_files = db.relationship('ProjectFile', back_populates='stage', lazy=True)
+    tasks = db.relationship('StageTask', back_populates='stage', lazy=True, cascade='all, delete-orphan')
 
 # 阶段更新表
 class ProjectUpdate(db.Model):
@@ -82,30 +125,56 @@ class ProjectUpdate(db.Model):
 
 
 # 修改ProjectFile模型
+# class ProjectFile(db.Model):
+#     __tablename__ = 'project_files'
+#     id = db.Column(db.Integer, primary_key=True)
+#     original_name = db.Column(db.String(255))
+#     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
+#     stage_id = db.Column(db.Integer, db.ForeignKey('project_stages.id'), nullable=False)
+#     task_id = db.Column(db.Integer, db.ForeignKey('stage_tasks.id'), nullable=True)
+#     file_name = db.Column(db.String(255), nullable=False)
+#     file_type = db.Column(db.String(100))
+#     file_path = db.Column(db.String(255), nullable=False)
+#     # upload_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+#     upload_user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+#     upload_date = db.Column(db.DateTime, nullable=False, default=datetime.now)
+#     text_extracted = db.Column(db.Boolean, default=False)
+#     is_public = db.Column(db.Boolean, default=False)  # 是否公开
+#
+#     # 关联
+#     # upload_user = db.relationship('User', backref='uploaded_files')
+#     upload_user = db.relationship('User', backref=db.backref('uploaded_files', passive_deletes=True))
+#     project = db.relationship('Project', back_populates='files')
+#     stage = db.relationship('ProjectStage', back_populates='stage_files')
+#     task = db.relationship('StageTask', backref='files')
+#     content = db.relationship('FileContent', backref='file', uselist=False,
+#                               cascade='all, delete-orphan')
+
+
 class ProjectFile(db.Model):
     __tablename__ = 'project_files'
     id = db.Column(db.Integer, primary_key=True)
     original_name = db.Column(db.String(255))
     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
+    subproject_id = db.Column(db.Integer, db.ForeignKey('subprojects.id'), nullable=False)
     stage_id = db.Column(db.Integer, db.ForeignKey('project_stages.id'), nullable=False)
     task_id = db.Column(db.Integer, db.ForeignKey('stage_tasks.id'), nullable=True)
     file_name = db.Column(db.String(255), nullable=False)
     file_type = db.Column(db.String(100))
     file_path = db.Column(db.String(255), nullable=False)
-    # upload_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     upload_user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     upload_date = db.Column(db.DateTime, nullable=False, default=datetime.now)
     text_extracted = db.Column(db.Boolean, default=False)
     is_public = db.Column(db.Boolean, default=False)  # 是否公开
 
-    # 关联
-    # upload_user = db.relationship('User', backref='uploaded_files')
+    # 关系
     upload_user = db.relationship('User', backref=db.backref('uploaded_files', passive_deletes=True))
     project = db.relationship('Project', back_populates='files')
+    subproject = db.relationship('Subproject', backref='files')
     stage = db.relationship('ProjectStage', back_populates='stage_files')
     task = db.relationship('StageTask', backref='files')
-    content = db.relationship('FileContent', backref='file', uselist=False,
-                              cascade='all, delete-orphan')
+    content = db.relationship('FileContent', backref='file', uselist=False, cascade='all, delete-orphan')
+
 
 
 # 阶段任务表
@@ -128,14 +197,40 @@ class StageTask(db.Model):
 
 
 # 编辑时间跟踪表
+# class EditTimeTracking(db.Model):
+#     __tablename__ = 'edit_time_tracking'
+#
+#     id = db.Column(db.Integer, primary_key=True)
+#     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
+#     # user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+#     user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+#     edit_type = db.Column(db.String(20), nullable=False)  # 'stage' or 'task'
+#     start_time = db.Column(db.DateTime, nullable=False)
+#     end_time = db.Column(db.DateTime, nullable=False)
+#     duration = db.Column(db.Integer, nullable=False)  # 持续时间（秒）
+#     stage_id = db.Column(db.Integer, db.ForeignKey('project_stages.id'), nullable=True)
+#     task_id = db.Column(db.Integer, db.ForeignKey('stage_tasks.id'), nullable=True)
+#
+#     # 关系
+#     project = db.relationship('Project', backref='edit_tracks')
+#     # user = db.relationship('User', backref='edit_tracks')
+#     user = db.relationship('User', backref=db.backref('edit_tracks', passive_deletes=True))
+#     stage = db.relationship('ProjectStage', backref='edit_tracks')
+#     task = db.relationship('StageTask', backref='edit_tracks')
+
+
+
+
+
+
 class EditTimeTracking(db.Model):
     __tablename__ = 'edit_time_tracking'
 
     id = db.Column(db.Integer, primary_key=True)
     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
-    # user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    subproject_id = db.Column(db.Integer, db.ForeignKey('subprojects.id'), nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
-    edit_type = db.Column(db.String(20), nullable=False)  # 'stage' or 'task'
+    edit_type = db.Column(db.String(20), nullable=False)  # 'subproject', 'stage', or 'task'
     start_time = db.Column(db.DateTime, nullable=False)
     end_time = db.Column(db.DateTime, nullable=False)
     duration = db.Column(db.Integer, nullable=False)  # 持续时间（秒）
@@ -144,11 +239,10 @@ class EditTimeTracking(db.Model):
 
     # 关系
     project = db.relationship('Project', backref='edit_tracks')
-    # user = db.relationship('User', backref='edit_tracks')
+    subproject = db.relationship('Subproject', backref='edit_tracks')
     user = db.relationship('User', backref=db.backref('edit_tracks', passive_deletes=True))
     stage = db.relationship('ProjectStage', backref='edit_tracks')
     task = db.relationship('StageTask', backref='edit_tracks')
-
 
 # 补卡记录表
 class ReportClockin(db.Model):

@@ -59,8 +59,6 @@ from flask import send_file, Response, stream_with_context, jsonify
 import time
 import shutil
 
-
-
 # 测试开发 使用本路径
 # 获取Python解释器所在目录
 python_dir = os.path.dirname(sys.executable)
@@ -191,8 +189,6 @@ def create_upload_path(user_id, project_id, subproject_id, stage_id, task_id=Non
         return relative_path, absolute_path
     except Exception as e:
         raise Exception(f"创建上传路径失败: {str(e)}")
-
-
 
 
 def generate_unique_filename(directory, original_filename):
@@ -335,7 +331,8 @@ def get_stage_task_files(stage_id, task_id):
         print(f"获取阶段文件时出错： {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-# 2025年3月17日14:54:58
+
+# 获取子项目下所有文件 - 新增端点
 @files_bp.route('/subproject/<int:subproject_id>/files', methods=['GET'])
 @track_activity
 def get_subproject_files(subproject_id):
@@ -365,10 +362,11 @@ def get_subproject_files(subproject_id):
                 'fileType': file.file_type,
                 'uploadTime': file.upload_date.isoformat(),
                 'uploader': uploader_name,
-                'projectName': file.project.name if file.project else None,
-                'subprojectName': file.subproject.name if file.subproject else None,
-                'stageName': file.stage.name if file.stage else None,
-                'taskName': file.task.name if file.task else None,
+                'upload_user_id': file.upload_user_id,
+                'projectName': file.project.name if hasattr(file, 'project') and file.project else None,
+                'subprojectName': file.subproject.name if hasattr(file, 'subproject') and file.subproject else None,
+                'stageName': file.stage.name if hasattr(file, 'stage') and file.stage else None,
+                'taskName': file.task.name if hasattr(file, 'task') and file.task else None,
                 'is_public': file.is_public
             })
 
@@ -376,6 +374,55 @@ def get_subproject_files(subproject_id):
 
     except Exception as e:
         print(f"获取子项目文件时出错： {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+# 获取阶段下所有文件 - 新增端点
+@files_bp.route('/stage/<int:stage_id>/files', methods=['GET'])
+@track_activity
+def get_stage_files(stage_id):
+    try:
+        files = ProjectFile.query.filter_by(
+            stage_id=stage_id
+        ).all()
+
+        files_data = []
+        for file in files:
+            # 获取上传用户信息
+            uploader = User.query.get(file.upload_user_id)
+            uploader_name = get_user_display_name(uploader)
+
+            # 获取文件大小
+            try:
+                file_size = os.path.getsize(os.path.join(current_app.root_path, file.file_path)) if os.path.exists(
+                    os.path.join(current_app.root_path, file.file_path)) else 0
+            except:
+                file_size = 0
+
+            files_data.append({
+                'id': file.id,
+                'fileName': file.file_name,
+                'originalName': file.original_name,
+                'fileSize': file_size,
+                'fileType': file.file_type,
+                'uploadTime': file.upload_date.isoformat(),
+                'uploader': uploader_name,
+                'upload_user_id': file.upload_user_id,
+                'projectName': file.project.name,
+                'project_id': file.project_id,
+                'project_name': file.project.name if hasattr(file, 'project') and file.project else None,
+                'task_id': file.task_id,
+                'subproject_id': file.subproject_id,
+                'subprojectName': file.subproject.name,
+                'stageName': file.stage.name,
+                'taskName': file.task.name,
+                'is_public': file.is_public,
+            })
+
+        return jsonify(files_data)
+
+    except Exception as e:
+        print(f"获取阶段文件时出错： {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -453,7 +500,8 @@ def get_subproject_files(subproject_id):
 #     return jsonify({'message': '文件上传成功', 'file_id': project_file.id})
 
 # 2025年3月17日14:52:24
-@files_bp.route('/<int:project_id>/subprojects/<int:subproject_id>/stages/<int:stage_id>/tasks/<int:task_id>/upload', methods=['POST'])
+@files_bp.route('/<int:project_id>/subprojects/<int:subproject_id>/stages/<int:stage_id>/tasks/<int:task_id>/upload',
+                methods=['POST'])
 @track_activity
 def upload_task_file(project_id, subproject_id, stage_id, task_id):
     file = request.files.get('file')
@@ -530,121 +578,7 @@ def upload_task_file(project_id, subproject_id, stage_id, task_id):
     return jsonify({'message': '文件上传成功', 'file_id': project_file.id})
 
 
-
-
-
 # 搜索功能，加权限展示，加公开属性
-# @files_bp.route('/search', methods=['GET'])
-# @track_activity
-# def search_files():
-#     try:
-#         # 获取当前用户 ID 和角色
-#         employee_id = get_employee_id()
-#         current_user = User.query.get(employee_id)
-#         if not current_user:
-#             return jsonify({'error': '未找到用户'}), 404
-#
-#         search_query = request.args.get('query', '').strip()
-#         visibility = request.args.get('visibility', '')  # 获取可见性筛选参数
-#
-#         if not search_query:
-#             return jsonify({'error': '搜索条件必填'}), 400
-#
-#         base_query = ProjectFile.query.options(
-#             joinedload(ProjectFile.project),
-#             joinedload(ProjectFile.stage),
-#             joinedload(ProjectFile.task),
-#             joinedload(ProjectFile.upload_user),
-#             joinedload(ProjectFile.content)
-#         )
-#
-#         # 修改权限筛选逻辑，加入可见性筛选
-#         if current_user.role != 1:  # 不是管理员
-#             if visibility == 'public':
-#                 base_query = base_query.filter(ProjectFile.is_public == True)
-#             elif visibility == 'private':
-#                 base_query = base_query.filter(
-#                     ProjectFile.upload_user_id == employee_id
-#                 )
-#             else:
-#                 base_query = base_query.filter(
-#                     or_(
-#                         ProjectFile.upload_user_id == employee_id,
-#                         ProjectFile.is_public == True
-#                     )
-#                 )
-#         else:  # 管理员可以看到所有文件，但仍然应用可见性筛选
-#             if visibility == 'public':
-#                 base_query = base_query.filter(ProjectFile.is_public == True)
-#             elif visibility == 'private':
-#                 base_query = base_query.filter(ProjectFile.is_public == False)
-#
-#         search_conditions = [
-#             ProjectFile.original_name.ilike(f'%{search_query}%'),
-#             ProjectFile.file_name.ilike(f'%{search_query}%'),
-#             ProjectFile.file_type.ilike(f'%{search_query}%'),
-#             ProjectFile.file_path.ilike(f'%{search_query}%'),
-#             Project.name.ilike(f'%{search_query}%'),
-#             ProjectStage.name.ilike(f'%{search_query}%'),
-#             StageTask.name.ilike(f'%{search_query}%'),
-#             User.username.ilike(f'%{search_query}%'),
-#             FileContent.content.ilike(f'%{search_query}%')
-#         ]
-#
-#         search_results = base_query \
-#             .join(Project) \
-#             .join(ProjectStage) \
-#             .join(StageTask) \
-#             .join(User, ProjectFile.upload_user_id == User.id) \
-#             .outerjoin(FileContent) \
-#             .filter(or_(*search_conditions)) \
-#             .all()
-#
-#         results = []
-#         for file in search_results:
-#             try:
-#                 file_path = os.path.join(current_app.root_path, file.file_path)
-#                 file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
-#
-#                 result = {
-#                     'id': file.id,
-#                     'fileName': file.file_name,
-#                     'originalName': highlight_text(file.original_name, search_query),
-#                     'fileType': file.file_type,
-#                     'fileSize': file_size,
-#                     'uploadTime': file.upload_date.isoformat(),
-#                     'uploader': highlight_text(file.upload_user.username, search_query),
-#                     'projectName': highlight_text(file.project.name if file.project else None, search_query),
-#                     'stageName': highlight_text(file.stage.name if file.stage else None, search_query),
-#                     'taskName': highlight_text(file.task.name if file.task else None, search_query),
-#                     'is_public': file.is_public  # 添加可见性字段
-#                 }
-#
-#                 # 添加内容预览
-#                 if file.content:
-#                     preview = get_content_preview(
-#                         file.content.content,
-#                         search_query,
-#                         context_length=150
-#                     )
-#                     result['contentPreview'] = preview if preview else "无匹配内容"
-#                 else:
-#                     result['contentPreview'] = "未提取内容"
-#
-#                 results.append(result)
-#             except Exception as e:
-#                 print(f"处理文件 {file.id} 时出错: {str(e)}")
-#                 continue
-#
-#         return jsonify({
-#             'results': results,
-#             'total': len(results)
-#         })
-#
-#     except Exception as e:
-#         print(f"搜索错误: {str(e)}")
-#         return jsonify({'error': str(e)}), 500
-
 # 2025年3月17日14:55:30
 @files_bp.route('/search', methods=['GET'])
 @track_activity
@@ -736,7 +670,8 @@ def search_files():
                     'uploadTime': file.upload_date.isoformat(),
                     'uploader': highlight_text(file.upload_user.username, search_query),
                     'projectName': highlight_text(file.project.name if file.project else None, search_query),
-                    'subprojectName': highlight_text(file.subproject.name if file.subproject else None, search_query),  # 添加子项目名称
+                    'subprojectName': highlight_text(file.subproject.name if file.subproject else None, search_query),
+                    # 添加子项目名称
                     'stageName': highlight_text(file.stage.name if file.stage else None, search_query),
                     'taskName': highlight_text(file.task.name if file.task else None, search_query),
                     'is_public': file.is_public
@@ -766,9 +701,6 @@ def search_files():
     except Exception as e:
         print(f"搜索错误: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
-
-
 
 
 # 获取内容预览
@@ -1011,11 +943,14 @@ def export_file_list():
         base_query = db.session.query(
             ProjectFile,
             Project.name.label('project_name'),
+            Subproject.name.label('subproject_name'),  # 添加子项目名称
             ProjectStage.name.label('stage_name'),
             StageTask.name.label('task_name'),
             User.username.label('uploader_name')
         ).join(
             Project, ProjectFile.project_id == Project.id
+        ).join(
+            Subproject, ProjectFile.subproject_id == Subproject.id  # 添加子项目关联
         ).join(
             ProjectStage, ProjectFile.stage_id == ProjectStage.id
         ).join(
@@ -1028,9 +963,10 @@ def export_file_list():
         if current_user.role != 1:  # 如果不是管理员，只能看到自己的文件
             base_query = base_query.filter(ProjectFile.upload_user_id == current_user_id)
 
-        # 执行查询，并按项目、阶段、任务、上传时间排序
+        # 执行查询，并按项目、子项目、阶段、任务、上传时间排序
         files_query = base_query.order_by(
             Project.name,
+            Subproject.name,  # 按子项目排序
             ProjectStage.name,
             StageTask.name,
             ProjectFile.upload_date
@@ -1057,18 +993,21 @@ def export_file_list():
 
         # 设置中文字体
         style = doc.styles['Normal']
-        style.font.name = 'Times New Roman'
-        style._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
+        doc.styles["Normal"].font.name = u"微软雅黑"
+        style._element.rPr.rFonts.set(qn('w:eastAsia'), u'微软雅黑')
 
         # 设置标题字体
-        for i in range(1, 4):
+        for i in range(1, 5):  # 增加到5级标题，为子项目增加一级
             heading_style = doc.styles[f'Heading {i}']
-            heading_style.font.name = 'Times New Roman'
-            heading_style._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
+            heading_style.font.name = '方正小标宋_GBK'
+            heading_style._element.rPr.rFonts.set(qn('w:eastAsia'), u'方正小标宋_GBK')
 
-        # 添加标题和基本信息
+        # 添加标题并设置其字体
         title = doc.add_heading(f'{current_user.username}的文件管理报告', 0)
         title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        for run in title.runs:
+            run.font.name = '方正小标宋_GBK'
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), u'方正小标宋_GBK')
 
         doc.add_paragraph(f'导出时间：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
         doc.add_paragraph(f'导出用户：{current_user.username}')
@@ -1076,42 +1015,68 @@ def export_file_list():
         doc.add_paragraph(f'文件总大小：{format_file_size(total_size)}')
         doc.add_paragraph()
 
-        # 按项目、阶段、任务组织文件列表
+        # 按项目、子项目、阶段、任务组织文件列表
         current_project = None
+        current_subproject = None  # 添加子项目级别
         current_stage = None
         current_task = None
+        current_table = None
 
         for file_data in files_query:
-            file, project_name, stage_name, task_name, uploader = file_data
+            file, project_name, subproject_name, stage_name, task_name, uploader = file_data
 
             # 项目层级
             if current_project != project_name:
                 current_project = project_name
-                doc.add_heading(f'项目：{project_name}', level=1)
+                heading = doc.add_heading(f'项目：{project_name}', level=1)
+                # 确保每个标题的字体设置都正确
+                for run in heading.runs:
+                    run.font.name = '方正小标宋_GBK'
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), u'方正小标宋_GBK')
+                current_subproject = None
+                current_stage = None
+                current_task = None
+
+            # 子项目层级
+            if current_subproject != subproject_name:
+                current_subproject = subproject_name
+                heading = doc.add_heading(f'子项目：{subproject_name}', level=2)
+                # 确保每个标题的字体设置都正确
+                for run in heading.runs:
+                    run.font.name = '方正小标宋_GBK'
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), u'方正小标宋_GBK')
                 current_stage = None
                 current_task = None
 
             # 阶段层级
             if current_stage != stage_name:
                 current_stage = stage_name
-                doc.add_heading(f'阶段：{stage_name}', level=2)
+                heading = doc.add_heading(f'阶段：{stage_name}', level=3)
+                # 确保每个标题的字体设置都正确
+                for run in heading.runs:
+                    run.font.name = '方正小标宋_GBK'
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), u'方正小标宋_GBK')
                 current_task = None
 
             # 任务层级
             if current_task != task_name:
                 current_task = task_name
-                doc.add_heading(f'任务：{task_name}', level=3)
+                heading = doc.add_heading(f'任务：{task_name}', level=4)
+                # 确保每个标题的字体设置都正确
+                for run in heading.runs:
+                    run.font.name = '方正小标宋_GBK'
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), u'方正小标宋_GBK')
 
                 # 添加文件列表表格
-                table = doc.add_table(rows=1, cols=4)
-                table.style = 'Table Grid'
+                current_table = doc.add_table(rows=1, cols=4)
+                current_table.style = 'Table Grid'
 
                 # 设置表格标题行字体
-                header_cells = table.rows[0].cells
+                header_cells = current_table.rows[0].cells
                 for cell in header_cells:
                     paragraph = cell.paragraphs[0]
                     run = paragraph.runs[0] if paragraph.runs else paragraph.add_run()
-                    run.font.name = 'Times New Roman'
+                    run.font.name = '微软雅黑'
                     run._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
 
                 header_cells[0].text = '文件名'
@@ -1123,7 +1088,7 @@ def export_file_list():
             file_path = os.path.join(current_app.root_path, file.file_path)
             file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
 
-            row_cells = table.add_row().cells
+            row_cells = current_table.add_row().cells
 
             # 设置表格内容字体
             for i, text in enumerate([
@@ -1134,7 +1099,7 @@ def export_file_list():
             ]):
                 paragraph = row_cells[i].paragraphs[0]
                 run = paragraph.add_run(text)
-                run.font.name = 'Times New Roman'
+                run.font.name = '宋体'
                 run._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
 
         # 保存文档到内存
@@ -1357,7 +1322,5 @@ def should_use_landscape(data, font_name='SimSun', font_size=8):
     return total_required_width > (A4_PORTRAIT_WIDTH * 0.8)
 
 
-
 # Flask路由部分保持不变
 merge_progress = {}
-

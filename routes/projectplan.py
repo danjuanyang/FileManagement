@@ -156,46 +156,54 @@ def get_project_stages(project_id):
     } for stage in stages])
 
 
-# 创建项目阶段
-# @projectplan_bp.route('/stages', methods=['POST'])
-# @track_activity
-# def create_project_stage():
-#     data = request.get_json()
-#     tracking_id = data.pop('trackingId', None)
-#
-#     # 从子项目中获取project_id（如果未提供）
-#     project_id = data.get('projectId')
-#     subproject_id = data['subprojectId']
-#
-#     if not project_id:
-#         subproject = Subproject.query.get(subproject_id)
-#         if subproject:
-#             project_id = subproject.project_id
-#         else:
-#             return jsonify({'error': '找不到小项目或项目ID不存在'}), 404
-#
-#     stage = ProjectStage(
-#         name=data['name'],
-#         description=data['description'],
-#         start_date=datetime.strptime(data['startDate'], '%Y-%m-%d'),
-#         end_date=datetime.strptime(data['endDate'], '%Y-%m-%d'),
-#         progress=data['progress'],
-#         status=data['status'],
-#         project_id=project_id,
-#         subproject_id=subproject_id
-#     )
-#
-#     db.session.add(stage)
-#
-#     if tracking_id:
-#         tracking = EditTimeTracking.query.get(tracking_id)
-#         if tracking:
-#             tracking.end_time = datetime.now()
-#             tracking.duration = int((tracking.end_time - tracking.start_time).total_seconds())
-#             tracking.stage_id = stage.id
-#
-#     db.session.commit()
-#     return jsonify({'message': '阶段创建成功', '阶段ID': stage.id}), 201
+# 创建新的阶段
+@projectplan_bp.route('/stages', methods=['POST'])
+@track_activity
+def create_project_stage():
+    data = request.get_json()
+    tracking_id = data.pop('trackingId', None)
+
+    # 从子项目中获取project_id（如果未提供）
+    project_id = data.get('projectId')
+    subproject_id = data['subprojectId']
+
+    if not project_id:
+        subproject = Subproject.query.get(subproject_id)
+        if subproject:
+            project_id = subproject.project_id
+        else:
+            return jsonify({'error': '找不到小项目或项目ID不存在'}), 404
+
+    try:
+        stage = ProjectStage(
+            name=data['name'],
+            description=data['description'],
+            start_date=datetime.strptime(data['startDate'], '%Y-%m-%d'),
+            end_date=datetime.strptime(data['endDate'], '%Y-%m-%d'),
+            progress=data['progress'],
+            status=data['status'],
+            project_id=project_id,
+            subproject_id=subproject_id
+        )
+
+        db.session.add(stage)
+
+        if tracking_id:
+            tracking = EditTimeTracking.query.get(tracking_id)
+            if tracking:
+                tracking.end_time = datetime.now()
+                tracking.duration = int((tracking.end_time - tracking.start_time).total_seconds())
+                tracking.stage_id = stage.id
+
+        db.session.commit()
+
+        # 更新子项目进度
+        update_subproject_progress(subproject_id)
+
+        return jsonify({'message': '阶段创建成功', 'id': stage.id}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
 
 
 # ------------------ 文件终端节点 ------------------
@@ -223,10 +231,15 @@ def get_subproject_files(subproject_id):
             'upload_user_id': file.upload_user_id,
             'isPublic': file.is_public,
             'stage_id': file.stage_id,
+
+            'projectName': file.project.name,
+            'project_id': file.project_id,
+            'project_name': file.project.name if hasattr(file, 'project') and file.project else None,
             'task_id': file.task_id,
             'subproject_id': file.subproject_id,
-            'project_id': file.project_id,
-            'project_name': project_name
+            'subprojectName': file.subproject.name,
+            'stageName': file.stage.name,
+            'taskName': file.task.name,
         } for file in files])
 
     except Exception as e:
@@ -252,11 +265,17 @@ def get_project_files(project_id):
             'upload_user_id': file.upload_user_id,
             'isPublic': file.is_public,
             'stage_id': file.stage_id,
+
+            'subproject_name': file.subproject.name if hasattr(file, 'subproject') and file.subproject else "未知子项目",
+
+            'projectName': file.project.name,
+            'project_id': file.project_id,
+            'project_name': file.project.name if hasattr(file, 'project') and file.project else None,
             'task_id': file.task_id,
             'subproject_id': file.subproject_id,
-            'project_id': file.project_id,
-            'project_name': file.project.name if hasattr(file, 'project') and file.project else "未知项目",
-            'subproject_name': file.subproject.name if hasattr(file, 'subproject') and file.subproject else "未知小项目"
+            'subprojectName': file.subproject.name,
+            'stageName': file.stage.name,
+            'taskName': file.task.name,
         } for file in files])
 
     except Exception as e:
@@ -406,7 +425,7 @@ def delete_task(id):
     db.session.delete(task)
     db.session.commit()
 
-    # Update stage progress after task deletion
+    # 删除任务后更新阶段进度
     update_stage_progress(stage_id)
 
     return jsonify({'message': '任务删除成功'}), 200
@@ -510,7 +529,6 @@ def end_edit_tracking():
         return jsonify({'error': str(e)}), 500
 
 
-
 # ------------------ 导出端点------------------
 
 # 更新导出项目计划端点以包含子项目
@@ -530,23 +548,34 @@ def export_project_plan(project_id):
             'deadline': subproject.deadline.isoformat(),
             'progress': subproject.progress,
             'status': subproject.status,
-            'stages': [{
-                'id': stage.id,
-                'name': stage.name,
-                'description': stage.description,
-                'startDate': stage.start_date.isoformat(),
-                'endDate': stage.end_date.isoformat(),
-                'progress': stage.progress,
-                'status': stage.status,
-                'tasks': [{
-                    'id': task.id,
-                    'name': task.name,
-                    'description': task.description,
-                    'dueDate': task.due_date.isoformat(),
-                    'status': task.status,
-                    'progress': task.progress
-                } for task in stage.tasks]
-            } for stage in stages]
+            'subproject':[{
+                'id': subproject.id,
+                'name': subproject.name,
+                'description': subproject.description,
+                'startDate': subproject.start_date.isoformat(),
+                'deadline': subproject.deadline.isoformat(),
+                'progress': subproject.progress,
+                'status': subproject.status,
+
+                'stages': [{
+                    'id': stage.id,
+                    'name': stage.name,
+                    'description': stage.description,
+                    'startDate': stage.start_date.isoformat(),
+                    'endDate': stage.end_date.isoformat(),
+                    'progress': stage.progress,
+                    'status': stage.status,
+                    'tasks': [{
+                        'id': task.id,
+                        'name': task.name,
+                        'description': task.description,
+                        'dueDate': task.due_date.isoformat(),
+                        'status': task.status,
+                        'progress': task.progress
+                    } for task in stage.tasks]
+                } for stage in subproject.stages]
+            }for subproject in subprojects],
+
         }
         result.append(subproject_data)
 
@@ -573,6 +602,35 @@ def update_stage_progress(stage_id):
 
     # 更新子项目进度
     update_subproject_progress(stage.subproject_id)
+
+
+# 更新阶段数据
+@projectplan_bp.route('/stages/<int:id>', methods=['PUT'])
+@track_activity
+def update_stage(id):
+    stage = ProjectStage.query.get_or_404(id)
+    data = request.get_json()
+
+    if 'name' in data:
+        stage.name = data['name']
+    if 'description' in data:
+        stage.description = data['description']
+    if 'startDate' in data:
+        stage.start_date = datetime.strptime(data['startDate'], '%Y-%m-%d')
+    if 'endDate' in data:
+        stage.end_date = datetime.strptime(data['endDate'], '%Y-%m-%d')
+    if 'progress' in data:
+        stage.progress = data['progress']
+    if 'status' in data:
+        stage.status = data['status']
+
+    db.session.commit()
+
+    # 如果状态变为完成，可能需要更新子项目状态
+    if stage.status == 'completed':
+        update_subproject_progress(stage.subproject_id)
+
+    return jsonify({'message': '阶段更新成功'}), 200
 
 
 # 新功能，可根据阶段更新子项目进度

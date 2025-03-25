@@ -1184,6 +1184,55 @@ def update_file_visibility(file_id):
         return jsonify({'error': str(e)}), 500
 
 
+# 筛选所有公共文件
+@files_bp.route('/public-files', methods=['GET'])
+@track_activity
+def get_public_files():
+    try:
+        # 获取当前用户 ID 和角色
+        employee_id = get_employee_id()
+        current_user = User.query.get(employee_id)
+        if not current_user:
+            return jsonify({'error': '未找到用户'}), 404
+
+        # 查询所有公共文件
+        public_files = ProjectFile.query.filter_by(is_public=True).all()
+
+        files_data = []
+        for file in public_files:
+            # 获取上传用户信息
+            uploader = User.query.get(file.upload_user_id)
+            uploader_name = get_user_display_name(uploader)
+
+            # 获取文件大小
+            try:
+                file_size = os.path.getsize(os.path.join(current_app.root_path, file.file_path)) if os.path.exists(
+                    os.path.join(current_app.root_path, file.file_path)) else 0
+            except:
+                file_size = 0
+
+            files_data.append({
+                'id': file.id,
+                'fileName': file.file_name,
+                'originalName': file.original_name,
+                'fileSize': file_size,
+                'fileType': file.file_type,
+                'uploadTime': file.upload_date.isoformat(),
+                'uploader': uploader_name,
+                'projectName': file.project.name if file.project else None,
+                'subprojectName': file.subproject.name if file.subproject else None,  # 添加子项目名称
+                'stageName': file.stage.name if file.stage else None,
+                'taskName': file.task.name if file.task else None,
+                'is_public': file.is_public
+            })
+
+        return jsonify(files_data)
+
+    except Exception as e:
+        print(f"获取公共文件时出错： {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
 # 2025年1月15日17:11:19
 # 已解决！！
 

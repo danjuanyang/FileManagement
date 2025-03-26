@@ -1,5 +1,8 @@
 # routes/announcements.py
 import os
+from pipes import quote
+
+import jwt
 from flask import Blueprint, request, jsonify, send_from_directory
 from flask_cors import CORS
 from datetime import datetime
@@ -31,7 +34,7 @@ def allowed_file(filename):
 @track_activity
 @token_required
 def create_announcement(current_user):
-    if current_user.role != 1:  # Check if admin
+    if current_user.role != 1:  # 检查是否是管理员
         return jsonify({'error': '权限不足'}), 403
 
     try:
@@ -128,13 +131,165 @@ def create_announcement(current_user):
         return jsonify({'error': str(e)}), 500
 
 
-# 下载附件
-# 下载附件
-@announcement_bp.route('/announcements/<int:announcement_id>/attachments/<int:attachment_id>', methods=['GET'])
-@track_activity
-@token_required
-def download_attachment(current_user, announcement_id, attachment_id):
+# 2025年3月26日10:45:41
+# 预览PDF附件
+@announcement_bp.route('/announcements/<int:announcement_id>/attachments/<int:attachment_id>/preview', methods=['GET'])
+def preview_attachment(announcement_id, attachment_id):
     try:
+        # 从查询参数获取token
+        token = request.args.get('token')
+        if not token:
+            return jsonify({'error': 'token缺失'}), 401
+
+        # 手动验证token
+        try:
+            # 导入jwt包
+            import jwt
+            from flask import current_app
+
+            # 使用当前应用的SECRET_KEY
+            data = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=['HS256'])
+            current_user = User.query.filter_by(id=data['user_id']).first()
+
+            if not current_user:
+                return jsonify({'error': '用户不存在'}), 401
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'token已过期'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'error': '无效的token'}), 401
+        except Exception as e:
+            import traceback
+            print(traceback.format_exc())
+            return jsonify({'error': f'token验证错误: {str(e)}'}), 401
+
+        # 获取附件
+        attachment = AnnouncementAttachment.query.filter_by(
+            id=attachment_id,
+            announcement_id=announcement_id
+        ).first_or_404()
+
+        # 检查是否为PDF文件
+        if not attachment.original_filename.lower().endswith('.pdf'):
+            return jsonify({'error': '不是PDF文件，无法预览'}), 400
+
+        # 将公告标记为已读（如果尚未）
+        read_status = AnnouncementReadStatus.query.filter_by(
+            announcement_id=announcement_id,
+            user_id=current_user.id
+        ).first()
+
+        if read_status and not read_status.is_read:
+            read_status.is_read = True
+            read_status.read_at = datetime.now()
+            db.session.commit()
+
+        # 返回文件信息和直接访问URL
+        return jsonify({
+            'message': '获取PDF信息成功',
+            'data': {
+                'file_url': f'/api/announcements/announcements/{announcement_id}/attachments/{attachment_id}/view',
+                'file_size': os.path.getsize(os.path.join(UPLOAD_FOLDER, attachment.stored_filename)),
+                'file_name': attachment.original_filename
+            }
+        })
+
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+
+# 直接查看PDF文件
+@announcement_bp.route('/announcements/<int:announcement_id>/attachments/<int:attachment_id>/view', methods=['GET'])
+def view_pdf_attachment(announcement_id, attachment_id):
+    try:
+        # 从查询参数获取token
+        token = request.args.get('token')
+        if not token:
+            return jsonify({'error': 'token缺失'}), 401
+
+        # 手动验证token
+        try:
+            # 导入jwt包
+            import jwt
+            from flask import current_app
+
+            # 使用当前应用的SECRET_KEY
+            data = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=['HS256'])
+            current_user = User.query.filter_by(id=data['user_id']).first()
+
+            if not current_user:
+                return jsonify({'error': '用户不存在'}), 401
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'token已过期'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'error': '无效的token'}), 401
+        except Exception as e:
+            return jsonify({'error': f'token验证错误: {str(e)}'}), 401
+
+        # 获取附件
+        attachment = AnnouncementAttachment.query.filter_by(
+            id=attachment_id,
+            announcement_id=announcement_id
+        ).first_or_404()
+
+        # 为PDF预览设置正确的Content-Type
+        response = send_from_directory(
+            UPLOAD_FOLDER,
+            attachment.stored_filename,
+            mimetype='application/pdf'
+        )
+
+        # 设置内容处置为inline以在浏览器中预览
+        from urllib.parse import quote
+        response.headers['Content-Disposition'] = f'inline; filename="{quote(attachment.original_filename)}"'
+        return response
+
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+
+
+# 2025年3月26日10:46:45
+# 下载附件 - 更新为支持URL参数获取token
+@announcement_bp.route('/announcements/<int:announcement_id>/attachments/<int:attachment_id>', methods=['GET'])
+def download_attachment(announcement_id, attachment_id):
+    try:
+        # 首先尝试从请求头中获取token
+        token = None
+        current_user = None
+
+        if 'Authorization' in request.headers:
+            auth_header = request.headers['Authorization']
+            try:
+                token = auth_header.split(" ")[1]  # Bearer <token>
+            except IndexError:
+                pass
+
+        # 如果请求头中没有token，尝试从查询参数中获取
+        if not token:
+            token = request.args.get('token')
+
+        # 验证token并获取用户
+        if token:
+            try:
+                # 导入jwt包
+                import jwt
+                from flask import current_app
+
+                # 使用当前应用的SECRET_KEY
+                data = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=['HS256'])
+                current_user = User.query.filter_by(id=data['user_id']).first()
+            except Exception as e:
+                import traceback
+                print(traceback.format_exc())
+                return jsonify({'error': f'无效的token: {str(e)}'}), 401
+
+        if not current_user:
+            return jsonify({'error': 'token缺失或无效'}), 401
+
         # 获取附件
         attachment = AnnouncementAttachment.query.filter_by(
             id=attachment_id,
@@ -152,12 +307,11 @@ def download_attachment(current_user, announcement_id, attachment_id):
             read_status.read_at = datetime.now()
             db.session.commit()
 
-        # 修复：使用 werkzeug 的安全文件名确保文件名与标头兼容
-        # 和 URL 对 Content-Disposition 标头的文件名进行编码
+        # 从urllib.parse导入quote函数用于URL编码文件名
         from urllib.parse import quote
         encoded_filename = quote(attachment.original_filename)
 
-        # 明确设置响应头以确保文件名正确传递
+        # 发送文件
         response = send_from_directory(
             UPLOAD_FOLDER,
             attachment.stored_filename,
@@ -165,12 +319,14 @@ def download_attachment(current_user, announcement_id, attachment_id):
             download_name=attachment.original_filename
         )
 
-        # 简化的 Content-Disposition 标头与 HTTP 1.1 规范兼容
+        # 设置Content-Disposition标头
         response.headers['Content-Disposition'] = f"attachment; filename={encoded_filename}"
 
         return response
 
     except Exception as e:
+        import traceback
+        print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 
@@ -236,6 +392,7 @@ def get_announcements(current_user):
         return jsonify({'error': str(e)}), 500
 
 
+# 获取单个公告详情
 @announcement_bp.route('/announcements/<int:announcement_id>', methods=['GET'])
 @track_activity
 @token_required

@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app
 from flask_cors import CORS
-from models import db, Subproject, ProjectStage, StageTask, EditTimeTracking, ProjectFile
+from models import db, Subproject, ProjectStage, StageTask, EditTimeTracking, ProjectFile, Project
 from auth import get_employee_id
 from utils.activity_tracking import track_activity
 
@@ -39,6 +39,7 @@ def create_subproject():
     data = request.get_json()
     tracking_id = data.pop('trackingId', None)
 
+    # 创建子项目
     subproject = Subproject(
         name=data['name'],
         description=data.get('description', ''),
@@ -51,6 +52,11 @@ def create_subproject():
 
     db.session.add(subproject)
 
+    #重要说明：将父项目状态更新为 “in_progress”
+    project = Project.query.get(data['projectId'])
+    if project:
+        project.status = "in_progress"
+
     if tracking_id:
         tracking = EditTimeTracking.query.get(tracking_id)
         if tracking:
@@ -59,8 +65,7 @@ def create_subproject():
             tracking.subproject_id = subproject.id
 
     db.session.commit()
-    return jsonify({'message': '小项目创建成功', 'id': subproject.id}), 201
-
+    return jsonify({'message': '子项目创建成功', 'id': subproject.id}), 201
 
 # 更新子项目
 @projectplan_bp.route('/subprojects/<int:id>', methods=['PUT'])
@@ -77,6 +82,11 @@ def update_subproject(id):
         subproject.deadline = datetime.strptime(data['deadline'], '%Y-%m-%d')
     subproject.progress = data.get('progress', subproject.progress)
     subproject.status = data.get('status', subproject.status)
+
+    # 重要说明：将父项目状态更新为 “in_progress”
+    project = Project.query.get(data['projectId'])
+    if project:
+        project.status = "in_progress"
 
     db.session.commit()
     return jsonify({'message': '子项目更新成功'}), 200
@@ -172,7 +182,7 @@ def create_project_stage():
         if subproject:
             project_id = subproject.project_id
         else:
-            return jsonify({'error': '找不到小项目或项目ID不存在'}), 404
+            return jsonify({'error': '找不到子项目或项目ID不存在'}), 404
 
     try:
         stage = ProjectStage(
@@ -243,7 +253,7 @@ def get_subproject_files(subproject_id):
         } for file in files])
 
     except Exception as e:
-        print(f"获取小项目文件时出错: {str(e)}")
+        print(f"获取子项目文件时出错: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -329,7 +339,7 @@ def get_all_files():
                 'subproject_id': file.subproject_id,
                 'project_id': file.project_id,
                 'project_name': file.project.name if hasattr(file, 'project') and file.project else "未知项目",
-                'subproject_name': file.subproject.name if hasattr(file, 'subproject') and file.subproject else "未知小项目"
+                'subproject_name': file.subproject.name if hasattr(file, 'subproject') and file.subproject else "未知子项目"
             } for file in files],
             'total': total,
             'page': page,
@@ -532,14 +542,23 @@ def end_edit_tracking():
 # ------------------ 导出端点------------------
 
 # 更新导出项目计划端点以包含子项目
+# 正确的导出项目计划端点实现
 @projectplan_bp.route('/projects/<int:project_id>/export', methods=['GET'])
 @track_activity
 def export_project_plan(project_id):
+    # 检查项目是否存在
+    project = Project.query.get_or_404(project_id)
+
+    # 获取所有相关的子项目
     subprojects = Subproject.query.filter_by(project_id=project_id).all()
 
+    # 构建结果
     result = []
     for subproject in subprojects:
+        # 获取子项目的所有阶段
         stages = ProjectStage.query.filter_by(subproject_id=subproject.id).all()
+
+        # 构建子项目数据
         subproject_data = {
             'id': subproject.id,
             'name': subproject.name,
@@ -548,35 +567,38 @@ def export_project_plan(project_id):
             'deadline': subproject.deadline.isoformat(),
             'progress': subproject.progress,
             'status': subproject.status,
-            'subproject':[{
-                'id': subproject.id,
-                'name': subproject.name,
-                'description': subproject.description,
-                'startDate': subproject.start_date.isoformat(),
-                'deadline': subproject.deadline.isoformat(),
-                'progress': subproject.progress,
-                'status': subproject.status,
-
-                'stages': [{
-                    'id': stage.id,
-                    'name': stage.name,
-                    'description': stage.description,
-                    'startDate': stage.start_date.isoformat(),
-                    'endDate': stage.end_date.isoformat(),
-                    'progress': stage.progress,
-                    'status': stage.status,
-                    'tasks': [{
-                        'id': task.id,
-                        'name': task.name,
-                        'description': task.description,
-                        'dueDate': task.due_date.isoformat(),
-                        'status': task.status,
-                        'progress': task.progress
-                    } for task in stage.tasks]
-                } for stage in subproject.stages]
-            }for subproject in subprojects],
-
+            'stages': []  # 将包含该子项目的所有阶段
         }
+
+        # 添加每个阶段及其任务
+        for stage in stages:
+            stage_data = {
+                'id': stage.id,
+                'name': stage.name,
+                'description': stage.description,
+                'startDate': stage.start_date.isoformat(),
+                'endDate': stage.end_date.isoformat(),
+                'progress': stage.progress,
+                'status': stage.status,
+                'tasks': []  # 将包含该阶段的所有任务
+            }
+
+            # 添加该阶段的所有任务
+            for task in stage.tasks:
+                task_data = {
+                    'id': task.id,
+                    'name': task.name,
+                    'description': task.description,
+                    'dueDate': task.due_date.isoformat(),
+                    'status': task.status,
+                    'progress': task.progress
+                }
+                stage_data['tasks'].append(task_data)
+
+            # 将阶段添加到子项目中
+            subproject_data['stages'].append(stage_data)
+
+        # 将子项目添加到结果中
         result.append(subproject_data)
 
     return jsonify(result)
@@ -646,5 +668,19 @@ def update_subproject_progress(subproject_id):
         subproject.status = 'completed'
     elif any(stage.status == 'in_progress' for stage in subproject.stages):
         subproject.status = 'in_progress'
+
+    # 更新父项目状态
+    project = Project.query.get(subproject.project_id)
+    if project and project.subprojects:
+        # 计算项目总进度
+        total_progress = sum(sp.progress for sp in project.subprojects)
+        project.progress = total_progress / len(project.subprojects)
+
+        # 更新项目状态
+        if all(sp.status == 'completed' for sp in project.subprojects):
+            project.status = 'completed'
+        elif any(sp.status == 'in_progress' for sp in project.subprojects) or any(
+                sp.progress < 100 for sp in project.subprojects):
+            project.status = 'in_progress'
 
     db.session.commit()

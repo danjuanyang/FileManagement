@@ -138,8 +138,6 @@ def update_project(current_user, project_id):  # 修改函数签名，接收 cur
         return jsonify({'error': str(e)}), 500
 
 
-
-
 # 查看项目文件
 @leader_bp.route('/projects/<int:project_id>/files', methods=['GET'])
 @track_activity
@@ -694,3 +692,58 @@ def reset_user_password(current_user, user_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
+
+
+# 添加新的端点以获取团队成员
+@leader_bp.route('/team-members', methods=['GET'])
+@track_activity
+@token_required
+def get_team_members(current_user):
+    # 只有管理员、经理和团队负责人可以访问此内容
+    if current_user.role not in [0, 1, 2]:
+        return jsonify({'error': '权限不足'}), 403
+
+    # 查询团队成员
+    team_members = User.query.filter_by(role=3).all()  # Role 3 = Team Member
+
+    return jsonify({
+        'team_members': [{
+            'id': tm.id,
+            'username': tm.username,
+            'name': tm.name if hasattr(tm, 'name') else tm.username,
+            'role': tm.role,
+        } for tm in team_members]
+    })
+
+
+@leader_bp.route('/my-projects', methods=['GET'])
+@track_activity
+@token_required
+def get_my_projects(current_user):
+    # 检查用户是否为团队领导
+    if current_user.role != 2:  # 团队领导角色
+        return jsonify({'error': '权限不足'}), 403
+
+    # Get projects assigned to this team leader
+    projects = Project.query.filter_by(employee_id=current_user.id).all()
+
+    return jsonify({
+        'projects': [{
+            'id': p.id,
+            'name': p.name,
+            'description': p.description,
+            'start_date': p.start_date.strftime('%Y-%m-%d') if p.start_date else None,
+            'deadline': p.deadline.strftime('%Y-%m-%d') if p.deadline else None,
+            'progress': p.progress,
+            'status': p.status,
+            'subprojects': [{
+                'id': sp.id,
+                'name': sp.name,
+                'description': sp.description,
+                'employee_id': sp.employee_id,
+                'employee_name': User.query.get(sp.employee_id).username if sp.employee_id else None,
+                'progress': sp.progress,
+                'status': sp.status,
+            } for sp in p.subprojects]
+        } for p in projects]
+    })

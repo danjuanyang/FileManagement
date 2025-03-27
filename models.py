@@ -46,8 +46,28 @@ class Project(db.Model):
     stages = db.relationship('ProjectStage', back_populates='project', lazy=True)
     updates = db.relationship('ProjectUpdate', back_populates='project')
 
+
 # 2025年3月17日14:15:37
 # 子项目表
+# class Subproject(db.Model):
+#     __tablename__ = 'subprojects'
+#
+#     id = db.Column(db.Integer, primary_key=True)
+#     name = db.Column(db.String(100), nullable=False)
+#     description = db.Column(db.Text)
+#     project_id = db.Column(db.Integer, db.ForeignKey('projects.id', ondelete='CASCADE'), nullable=False)
+#     start_date = db.Column(db.DateTime, default=datetime.now)
+#     deadline = db.Column(db.DateTime, nullable=False)
+#     progress = db.Column(db.Float, default=0.0)  # 0-100
+#     status = db.Column(db.String(20), default='pending')  # 待处理、正在干、已完成
+#     created_at = db.Column(db.DateTime, default=datetime.now)
+#     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+#
+#     # 关系
+#     project = db.relationship('Project', backref=db.backref('subprojects', lazy=True, cascade='all, delete-orphan'))
+#     stages = db.relationship('ProjectStage', back_populates='subproject', lazy=True, cascade='all, delete-orphan')
+
+# In models.py, update Subproject class
 class Subproject(db.Model):
     __tablename__ = 'subprojects'
 
@@ -55,6 +75,7 @@ class Subproject(db.Model):
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text)
     project_id = db.Column(db.Integer, db.ForeignKey('projects.id', ondelete='CASCADE'), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     start_date = db.Column(db.DateTime, default=datetime.now)
     deadline = db.Column(db.DateTime, nullable=False)
     progress = db.Column(db.Float, default=0.0)  # 0-100
@@ -64,12 +85,11 @@ class Subproject(db.Model):
 
     # 关系
     project = db.relationship('Project', backref=db.backref('subprojects', lazy=True, cascade='all, delete-orphan'))
+    employee = db.relationship('User', backref=db.backref('assigned_subprojects', lazy=True))
     stages = db.relationship('ProjectStage', back_populates='subproject', lazy=True, cascade='all, delete-orphan')
 
 
-
 # 项目阶段表
-
 # class ProjectStage(db.Model):
 #     __tablename__ = 'project_stages'
 #
@@ -80,14 +100,18 @@ class Subproject(db.Model):
 #     end_date = db.Column(db.Date, nullable=False)
 #     progress = db.Column(db.Integer, nullable=False)
 #     status = db.Column(db.String(20), nullable=False)
+#     subproject_id = db.Column(db.Integer, db.ForeignKey('subprojects.id', ondelete='CASCADE'), nullable=False)
+#     # 保留 project_id 以实现向后兼容性或快速查找
 #     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
 #
 #     # 关系
+#     # project = db.relationship('Project', backref=db.backref('stages', passive_deletes=True))
 #     project = db.relationship('Project', back_populates='stages')
-#     stage_files = db.relationship('ProjectFile', back_populates='stage', lazy=True)  # 修改为 stage_files
-#     tasks = db.relationship('StageTask', back_populates='stage', lazy=True)
+#     subproject = db.relationship('Subproject', back_populates='stages')
+#     stage_files = db.relationship('ProjectFile', back_populates='stage', lazy=True)
+#     tasks = db.relationship('StageTask', back_populates='stage', lazy=True, cascade='all, delete-orphan')
 
-
+# 项目阶段表
 class ProjectStage(db.Model):
     __tablename__ = 'project_stages'
 
@@ -103,11 +127,11 @@ class ProjectStage(db.Model):
     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
 
     # 关系
-    # project = db.relationship('Project', backref=db.backref('stages', passive_deletes=True))
     project = db.relationship('Project', back_populates='stages')
     subproject = db.relationship('Subproject', back_populates='stages')
     stage_files = db.relationship('ProjectFile', back_populates='stage', lazy=True)
     tasks = db.relationship('StageTask', back_populates='stage', lazy=True, cascade='all, delete-orphan')
+
 
 # 阶段更新表
 class ProjectUpdate(db.Model):
@@ -176,7 +200,6 @@ class ProjectFile(db.Model):
     content = db.relationship('FileContent', backref='file', uselist=False, cascade='all, delete-orphan')
 
 
-
 # 阶段任务表
 class StageTask(db.Model):
     __tablename__ = 'stage_tasks'
@@ -219,10 +242,6 @@ class StageTask(db.Model):
 #     task = db.relationship('StageTask', backref='edit_tracks')
 
 
-
-
-
-
 class EditTimeTracking(db.Model):
     __tablename__ = 'edit_time_tracking'
 
@@ -243,6 +262,7 @@ class EditTimeTracking(db.Model):
     user = db.relationship('User', backref=db.backref('edit_tracks', passive_deletes=True))
     stage = db.relationship('ProjectStage', backref='edit_tracks')
     task = db.relationship('StageTask', backref='edit_tracks')
+
 
 # 补卡记录表
 class ReportClockin(db.Model):
@@ -451,7 +471,6 @@ class UserActivityLog(db.Model):
             print(f"错误记录活动： {str(e)}")
 
 
-
 # ----------------公告板模型----------------
 class Announcement(db.Model):
     __tablename__ = 'announcements'
@@ -489,6 +508,7 @@ class AnnouncementReadStatus(db.Model):
         db.UniqueConstraint('announcement_id', 'user_id', name='_announcement_user_uc'),
     )
 
+
 # 公告附件表
 class AnnouncementAttachment(db.Model):
     __tablename__ = 'announcement_attachments'
@@ -504,18 +524,19 @@ class AnnouncementAttachment(db.Model):
     # 与公告的关系
     announcement = db.relationship('Announcement', backref=db.backref('attachments', cascade='all, delete-orphan'))
 
+
 # -----------------------------------------------------------------------------------------
 
 class Training(db.Model):
     __tablename__ = 'trainings'
 
-    id = db.Column(db.Integer, primary_key=True)    # 训练ID
-    trainer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)   # 训练师ID
+    id = db.Column(db.Integer, primary_key=True)  # 训练ID
+    trainer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)  # 训练师ID
     training_month = db.Column(db.String(7), nullable=False)  # 格式: "2024-01"
-    title = db.Column(db.String(100), nullable=False)   # 训练标题
-    description = db.Column(db.Text)    # 训练描述
+    title = db.Column(db.String(100), nullable=False)  # 训练标题
+    description = db.Column(db.Text)  # 训练描述
     status = db.Column(db.String(20), nullable=False)  # pending, completed
-    material_path = db.Column(db.String(255))   # 训练材料文件路径
+    material_path = db.Column(db.String(255))  # 训练材料文件路径
     upload_time = db.Column(db.DateTime)
     create_time = db.Column(db.DateTime, default=datetime.now)
     update_time = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
@@ -554,8 +575,8 @@ class Reply(db.Model):
     # 关系
     user = db.relationship('User', backref='replies')
 
-
     # -----------------------------------------------------------------------------------------
+
 
 # AI API 表
 class AIApi(db.Model):
@@ -569,6 +590,7 @@ class AIApi(db.Model):
 
     # 关系
     user = db.relationship('User', backref=db.backref('ai_apis', lazy='dynamic', passive_deletes=True))
+
 
 # AI 会话表
 class AIConversation(db.Model):
@@ -586,6 +608,7 @@ class AIConversation(db.Model):
     messages = db.relationship('AIMessage', backref='conversation', lazy='dynamic', cascade='all, delete-orphan')
     tags = db.relationship('AITag', secondary='ai_conversation_tags',
                            backref=db.backref('conversations', lazy='dynamic'))
+
 
 # AI 消息表
 class AIMessage(db.Model):
@@ -608,12 +631,14 @@ class AIMessage(db.Model):
         db.CheckConstraint("role IN ('user', 'assistant', 'system')", name='check_role'),
     )
 
+
 # AI 标签表
 class AITag(db.Model):
     __tablename__ = 'ai_tags'
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), unique=True, nullable=False)
+
 
 # AI 会话-标签关联表
 class AIConversationTag(db.Model):
@@ -622,6 +647,7 @@ class AIConversationTag(db.Model):
     conversation_id = db.Column(db.Integer, db.ForeignKey('ai_conversations.id', ondelete='CASCADE'),
                                 primary_key=True)
     tag_id = db.Column(db.Integer, db.ForeignKey('ai_tags.id', ondelete='CASCADE'), primary_key=True)
+
 
 # AI 消息反馈表
 class AIMessageFeedback(db.Model):
@@ -637,6 +663,7 @@ class AIMessageFeedback(db.Model):
     __table_args__ = (
         db.CheckConstraint("rating IN (1, -1)", name='check_rating'),
     )
+
 
 # 创建索引
 db.Index('idx_ai_messages_conversation_id', AIMessage.conversation_id)

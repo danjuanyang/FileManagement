@@ -322,10 +322,25 @@ def update_progress(project_id):
 
 @employee_bp.route('/subprojects/<int:subproject_id>/progress', methods=['PUT'])
 @track_activity
-def update_subproject_progress(subproject_id):
+def update_subproject_progress(current_user, subproject_id):
     subproject = Subproject.query.get_or_404(subproject_id)
+
+    # 权限检查 - 组员只能更新分配给自己的子项目
+    if current_user.role == 3 and subproject.employee_id != current_user.id:
+        return jsonify({'error': '您没有权限更新此子项目的进度'}), 403
+
+    # 组长只能更新自己项目下的子项目
+    elif current_user.role == 2:
+        project = Project.query.get(subproject.project_id)
+        if project.employee_id != current_user.id:
+            return jsonify({'error': '您没有权限更新此项目的子项目进度'}), 403
+
     data = request.get_json()
     subproject.progress = data['progress']
+
+    # 可能需要更新子项目状态
+    if data.get('status'):
+        subproject.status = data['status']
 
     # 更新父项目的进度
     # 父项目的进度基于所有子项目的平均进度
@@ -1120,4 +1135,199 @@ def change_user_password(current_user):
 
     except Exception as e:
         db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# -----------------------------------权限--------------------------------------
+# In employees.py, add a new endpoint
+@employee_bp.route('/my-subprojects', methods=['GET'])
+@track_activity
+@token_required
+def get_my_subprojects(current_user):
+    # 仅团队成员可以访问此端点
+    if current_user.role != 3:  # Team Member role
+        return jsonify({'error': '权限不足'}), 403
+
+    # 获取分配给此团队成员的子项目
+    subprojects = Subproject.query.filter_by(employee_id=current_user.id).all()
+
+    # 即使没有分配的子项目，也返回空数组而不是错误
+    if not subprojects:
+        return jsonify([])
+
+    return jsonify([{
+        'id': sp.id,
+        'name': sp.name,
+        'description': sp.description,
+        'project_id': sp.project_id,
+        'project_name': sp.project.name if sp.project else "未知项目",
+        'start_date': sp.start_date.strftime('%Y-%m-%d'),
+        'deadline': sp.deadline.strftime('%Y-%m-%d'),
+        'progress': sp.progress,
+        'status': sp.status,
+        'employee_id': sp.employee_id,
+        'stages': [{
+            'id': s.id,
+            'name': s.name,
+            'description': s.description,
+            'start_date': s.start_date.strftime('%Y-%m-%d'),
+            'end_date': s.end_date.strftime('%Y-%m-%d'),
+            'progress': s.progress,
+            'status': s.status,
+            'tasks': [{
+                'id': t.id,
+                'name': t.name,
+                'description': t.description,
+                'due_date': t.due_date.strftime('%Y-%m-%d'),
+                'status': t.status,
+                'progress': t.progress
+            } for t in s.tasks]
+        } for s in sp.stages]
+    } for sp in subprojects])
+
+
+# 在employees.py中添加这个新端点
+@employee_bp.route('/assigned-projects', methods=['GET'])
+@track_activity
+@token_required
+def get_assigned_projects_data(current_user):
+    # 确保是组员角色
+    if current_user.role != 3:  # 3 = Team Member role
+        return jsonify({'error': '此端点仅供组员访问'}), 403
+
+    try:
+        # 获取分配给此组员的所有子项目
+        assigned_subprojects = Subproject.query.filter_by(employee_id=current_user.id).all()
+
+        if not assigned_subprojects:
+            return jsonify({
+                'has_assignments': False,
+                'subprojects': []
+            })
+
+        # 构建完整的数据结构
+        result = {
+            'has_assignments': True,
+            'subprojects': []
+        }
+
+        for subproject in assigned_subprojects:
+            # 获取所有阶段
+            stages = ProjectStage.query.filter_by(subproject_id=subproject.id).all()
+
+            # 构建阶段数据，包括任务
+            stages_data = []
+            for stage in stages:
+                # 获取任务
+                tasks = StageTask.query.filter_by(stage_id=stage.id).all()
+
+                # 构建任务数据
+                tasks_data = []
+                for task in tasks:
+                    # 获取文件信息
+                    files = ProjectFile.query.filter_by(task_id=task.id).all()
+
+                    tasks_data.append({
+                        'id': task.id,
+                        'name': task.name,
+                        'description': task.description,
+                        'dueDate': task.due_date.isoformat(),
+                        'status': task.status,
+                        'progress': task.progress,
+                        'files': [{
+                            'id': f.id,
+                            'original_name': f.original_name,
+                            'file_type': f.file_type,
+                            'upload_date': f.upload_date.isoformat()
+                        } for f in files]
+                    })
+
+                stages_data.append({
+                    'id': stage.id,
+                    'name': stage.name,
+                    'description': stage.description,
+                    'startDate': stage.start_date.isoformat(),
+                    'endDate': stage.end_date.isoformat(),
+                    'progress': stage.progress,
+                    'status': stage.status,
+                    'tasks': tasks_data
+                })
+
+            # 获取项目信息
+            project = Project.query.get(subproject.project_id)
+
+            result['subprojects'].append({
+                'id': subproject.id,
+                'name': subproject.name,
+                'description': subproject.description,
+                'startDate': subproject.start_date.isoformat(),
+                'deadline': subproject.deadline.isoformat(),
+                'progress': subproject.progress,
+                'status': subproject.status,
+                'project_id': subproject.project_id,
+                'project_name': project.name if project else "未知项目",
+                'stages': stages_data
+            })
+
+        return jsonify(result)
+
+    except Exception as e:
+        print(f"获取组员分配的项目数据时出错: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+# 确保是组员角色
+@employee_bp.route('/assigned-projects/dashboard', methods=['GET'])
+@track_activity
+@token_required
+def get_assigned_projects_dashboard(current_user):
+    # 确保是组员角色
+    if current_user.role != 3:  # 3 = Team Member role
+        return jsonify({'error': '此端点仅供组员访问'}), 403
+
+    try:
+        # 获取分配给此组员的所有子项目
+        assigned_subprojects = Subproject.query.filter_by(employee_id=current_user.id).all()
+
+        # 如果没有分配的子项目，返回空响应
+        if not assigned_subprojects:
+            return jsonify({
+                'has_assignments': False,
+                'message': '您当前没有被分配任何子项目'
+            })
+
+        # 准备返回的数据
+        result = {
+            'has_assignments': True,
+            'subprojects': []
+        }
+
+        for subproject in assigned_subprojects:
+            # 获取父项目信息
+            project = Project.query.get(subproject.project_id)
+            project_name = project.name if project else "未知项目"
+
+            # 获取子项目的阶段
+            stages = ProjectStage.query.filter_by(subproject_id=subproject.id).all()
+
+            # 构建子项目数据
+            subproject_data = {
+                'id': subproject.id,
+                'name': subproject.name,
+                'description': subproject.description,
+                'project_id': subproject.project_id,
+                'project_name': project_name,
+                'startDate': subproject.start_date.strftime('%Y-%m-%d'),
+                'deadline': subproject.deadline.strftime('%Y-%m-%d'),
+                'progress': subproject.progress,
+                'status': subproject.status,
+                'stages_count': len(stages)
+            }
+
+            result['subprojects'].append(subproject_data)
+
+        return jsonify(result)
+
+    except Exception as e:
+        print(f"获取组员分配的项目数据时出错: {str(e)}")
         return jsonify({'error': str(e)}), 500

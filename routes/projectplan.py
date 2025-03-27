@@ -3,8 +3,9 @@ import os
 from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app
 from flask_cors import CORS
-from models import db, Subproject, ProjectStage, StageTask, EditTimeTracking, ProjectFile, Project
+from models import db, Subproject, ProjectStage, StageTask, EditTimeTracking, ProjectFile, Project, User
 from auth import get_employee_id
+from routes.employees import token_required
 from utils.activity_tracking import track_activity
 
 projectplan_bp = Blueprint('projectplan', __name__)
@@ -33,17 +34,29 @@ def get_project_subprojects(project_id):
 
 
 # 创建新的子项目
+# 加权限
 @projectplan_bp.route('/subprojects', methods=['POST'])
 @track_activity
-def create_subproject():
+@token_required
+def create_subproject(current_user):
     data = request.get_json()
     tracking_id = data.pop('trackingId', None)
+    project_id = data['projectId']
+
+    # 检查此用户是否已分配给项目
+    project = Project.query.get_or_404(project_id)
+
+    # 只有管理员、经理或分配的团队负责人才能创建子项目
+    if current_user.role > 2 or (current_user.role == 2 and project.employee_id != current_user.id):
+        return jsonify({'error': '权限不足'}), 403
 
     # 创建子项目
     subproject = Subproject(
         name=data['name'],
         description=data.get('description', ''),
-        project_id=data['projectId'],
+        project_id=project_id,
+        # 如果团队领导创建了它，他们可以预先分配它
+        employee_id=data.get('employee_id'),
         start_date=datetime.strptime(data['startDate'], '%Y-%m-%d') if 'startDate' in data else datetime.now(),
         deadline=datetime.strptime(data['deadline'], '%Y-%m-%d'),
         progress=data.get('progress', 0.0),
@@ -52,8 +65,7 @@ def create_subproject():
 
     db.session.add(subproject)
 
-    #重要说明：将父项目状态更新为 “in_progress”
-    project = Project.query.get(data['projectId'])
+    # 将父项目状态更新为 “in_progress”
     if project:
         project.status = "in_progress"
 
@@ -67,29 +79,39 @@ def create_subproject():
     db.session.commit()
     return jsonify({'message': '子项目创建成功', 'id': subproject.id}), 201
 
-# 更新子项目
+
+# 2025年3月27日10:39:55
+# 加权限的更新子项目
 @projectplan_bp.route('/subprojects/<int:id>', methods=['PUT'])
 @track_activity
-def update_subproject(id):
-    subproject = Subproject.query.get_or_404(id)
-    data = request.get_json()
+@token_required
+def update_subproject(current_user, id):
+    try:
+        subproject = Subproject.query.get_or_404(id)
 
-    subproject.name = data.get('name', subproject.name)
-    subproject.description = data.get('description', subproject.description)
-    if 'startDate' in data:
-        subproject.start_date = datetime.strptime(data['startDate'], '%Y-%m-%d')
-    if 'deadline' in data:
-        subproject.deadline = datetime.strptime(data['deadline'], '%Y-%m-%d')
-    subproject.progress = data.get('progress', subproject.progress)
-    subproject.status = data.get('status', subproject.status)
+        data = request.get_json()
+        # 添加具有验证的其他字段
+        subproject.name = data.get('name', subproject.name)
+        subproject.description = data.get('description', subproject.description)
+        # 使用验证更新字段
+        if 'name' in data:
+            subproject.name = data['name']
+        if 'startDate' in data:
+            subproject.start_date = datetime.strptime(data['startDate'], '%Y-%m-%d')
+        if 'deadline' in data:
+            subproject.deadline = datetime.strptime(data['deadline'], '%Y-%m-%d')
+        subproject.progress = data.get('progress', subproject.progress)
+        subproject.status = data.get('status', subproject.status)
 
-    # 重要说明：将父项目状态更新为 “in_progress”
-    project = Project.query.get(data['projectId'])
-    if project:
-        project.status = "in_progress"
-
-    db.session.commit()
-    return jsonify({'message': '子项目更新成功'}), 200
+        # 重要说明：将父项目状态更新为 “in_progress”
+        # project = Project.query.get(data['projectId'])
+        # if project:
+        #     project.status = "in_progress"
+        db.session.commit()
+        return jsonify({'message': '子项目更新成功'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
 
 
 # 删除子项目
@@ -166,19 +188,33 @@ def get_project_stages(project_id):
     } for stage in stages])
 
 
-# 创建新的阶段
+# 加权限的创建阶段
 @projectplan_bp.route('/stages', methods=['POST'])
 @track_activity
-def create_project_stage():
+@token_required
+def create_project_stage(current_user):
     data = request.get_json()
     tracking_id = data.pop('trackingId', None)
+    subproject_id = data['subprojectId']
+
+    # 验证访问权限
+    subproject = Subproject.query.get_or_404(subproject_id)
+
+    # 不同角色的权限检查
+    if current_user.role > 2:  # 组员
+        # 组员只能为分配给自己的子项目创建阶段
+        if subproject.employee_id != current_user.id:
+            return jsonify({'error': '您没有权限为此子项目创建阶段'}), 403
+    elif current_user.role == 2:  # 组长
+        # 组长只能为自己负责的项目下的子项目创建阶段
+        project = Project.query.get(subproject.project_id)
+        if project.employee_id != current_user.id:
+            return jsonify({'error': '您没有权限为此项目的子项目创建阶段'}), 403
 
     # 从子项目中获取project_id（如果未提供）
     project_id = data.get('projectId')
-    subproject_id = data['subprojectId']
 
     if not project_id:
-        subproject = Subproject.query.get(subproject_id)
         if subproject:
             project_id = subproject.project_id
         else:
@@ -276,7 +312,8 @@ def get_project_files(project_id):
             'isPublic': file.is_public,
             'stage_id': file.stage_id,
 
-            'subproject_name': file.subproject.name if hasattr(file, 'subproject') and file.subproject else "未知子项目",
+            'subproject_name': file.subproject.name if hasattr(file,
+                                                               'subproject') and file.subproject else "未知子项目",
 
             'projectName': file.project.name,
             'project_id': file.project_id,
@@ -444,29 +481,6 @@ def delete_task(id):
 # ------------------ 跟踪终端节点 ------------------
 
 # 更新编辑跟踪起始端点
-# @projectplan_bp.route('/tracking/start', methods=['POST'])
-# @track_activity
-# def start_edit_tracking():
-#     data = request.get_json()
-#     user_id = get_employee_id()
-#
-#     tracking = EditTimeTracking(
-#         project_id=data['projectId'],
-#         subproject_id=data.get('subprojectId'),
-#         user_id=user_id,
-#         edit_type=data['editType'],
-#         start_time=datetime.now(),
-#         end_time=datetime.now(),
-#         duration=0,
-#         stage_id=data.get('stageId'),
-#         task_id=data.get('taskId')
-#     )
-#
-#     db.session.add(tracking)
-#     db.session.commit()
-#
-#     return jsonify({'id': tracking.id}), 201
-
 # 2025年3月17日16:38:08
 @projectplan_bp.route('/tracking/start', methods=['POST'])
 @track_activity
@@ -684,3 +698,68 @@ def update_subproject_progress(subproject_id):
             project.status = 'in_progress'
 
     db.session.commit()
+
+
+# -------------------------------权限--------------------------------------
+
+# 组长分配
+@projectplan_bp.route('/subprojects/<int:id>/assign', methods=['PUT'])
+@track_activity
+@token_required
+def assign_subproject(current_user, id):
+    # 检查用户是否是团队领导
+    if current_user.role != 2:  # Team Leader role
+        return jsonify({'error': '权限不足'}), 403
+
+    subproject = Subproject.query.get_or_404(id)
+
+    # 检查团队领导是否负责父项目
+    project = Project.query.get(subproject.project_id)
+    if project.employee_id != current_user.id:
+        return jsonify({'error': '您不是此项目的组长，无法分配子项目'}), 403
+
+    data = request.get_json()
+
+    if 'employee_id' not in data:
+        return jsonify({'error': '缺少员工ID'}), 400
+
+    # 验证员工存在且是团队成员
+    employee = User.query.get(data['employee_id'])
+    if not employee:
+        return jsonify({'error': '员工不存在'}), 400
+    if employee.role != 3:  # Team Member role
+        return jsonify({'error': '只能将子项目分配给组员'}), 400
+
+    # 更新子项目的员工ID
+    subproject.employee_id = data['employee_id']
+
+    db.session.commit()
+    return jsonify({
+        'message': '子项目分配成功',
+        'subproject': {
+            'id': subproject.id,
+            'name': subproject.name,
+            'employee_id': subproject.employee_id
+        }
+    }), 200
+
+
+@projectplan_bp.route('/team-members', methods=['GET'])
+@track_activity
+@token_required
+def get_team_members(current_user):
+    # 只有管理员、经理和团队负责人可以访问此内容
+    if current_user.role not in [0, 1, 2]:
+        return jsonify({'error': '权限不足'}), 403
+
+    # 查询团队成员
+    team_members = User.query.filter_by(role=3).all()  # Role 3 =团队成员
+
+    return jsonify({
+        'team_members': [{
+            'id': tm.id,
+            'username': tm.username,
+            'name': tm.name if hasattr(tm, 'name') else tm.username,
+            'role': tm.role,
+        } for tm in team_members]
+    })

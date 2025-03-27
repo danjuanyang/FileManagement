@@ -29,6 +29,7 @@ def get_project_subprojects(project_id):
         'deadline': subproject.deadline.isoformat(),
         'progress': subproject.progress,
         'status': subproject.status,
+        'employee_id': subproject.employee_id,
         'stagesCount': len(subproject.stages) if hasattr(subproject, 'stages') else 0
     } for subproject in subprojects])
 

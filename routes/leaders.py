@@ -747,3 +747,135 @@ def get_my_projects(current_user):
             } for sp in p.subprojects]
         } for p in projects]
     })
+
+
+# -------------2025年3月27日22:36:34-------------------------------
+
+
+# 获取特定团队领导的团队成员
+@leader_bp.route('/team-leaders/<int:leader_id>/members', methods=['GET'])
+@token_required
+def get_leader_team_members(current_user, leader_id):
+    # 检查权限：管理员、经理或团队负责人本人
+    if current_user.role not in [0, 1] and current_user.id != leader_id:
+        return jsonify({'error': '权限不足'}), 403
+
+    # 验证领导者是否存在并具有正确的角色
+    leader = User.query.get_or_404(leader_id)
+    if leader.role != 2:  # 组长
+        return jsonify({'error': '指定的用户不是组长'}), 400
+
+    # 获取分配给此领导者的所有团队成员
+    team_members = User.query.filter_by(team_leader_id=leader_id).all()
+
+    return jsonify({
+        'leader': {
+            'id': leader.id,
+            'username': leader.username
+        },
+        'team_members': [{
+            'id': member.id,
+            'username': member.username
+        } for member in team_members]
+    })
+
+
+# 将团队成员分配给团队负责人
+@leader_bp.route('/team-leaders/<int:leader_id>/members', methods=['PUT'])
+@token_required
+def assign_members_to_leader(current_user, leader_id):
+    # 只有管理员和经理才能分配团队成员
+    if current_user.role not in [0, 1]:
+        return jsonify({'error': '权限不足'}), 403
+
+    data = request.get_json()
+    member_ids = data.get('member_ids', [])
+
+    # 验证领导者是否存在并具有正确的角色
+    leader = User.query.get_or_404(leader_id)
+    if leader.role != 2:  # Team Leader role
+        return jsonify({'error': '指定的用户不是组长'}), 400
+
+    try:
+        # 首先清除现有团队成员（可选）
+        # User.query.filter_by(team_leader_id=leader_id).update({'team_leader_id': None})
+
+        #分配新团队成员
+        for member_id in member_ids:
+            member = User.query.get_or_404(member_id)
+
+            #检查用户是否为团队成员
+            if member.role != 3:  # 团队成员角色
+                return jsonify({'error': f'用户 {member.username} 不是组员角色'}), 400
+
+            # 检查用户是否已分配给其他领导者
+            if member.team_leader_id is not None and member.team_leader_id != leader_id:
+                return jsonify({'error': f'用户 {member.username} 已经分配给其他组长'}), 400
+
+            # 分配给此领导者
+            member.team_leader_id = leader_id
+
+        db.session.commit()
+        return jsonify({'message': '组员分配成功'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# 从团队负责人中删除团队成员
+@leader_bp.route('/team-leaders/<int:leader_id>/members/<int:member_id>', methods=['DELETE'])
+@token_required
+def remove_member_from_leader(current_user, leader_id, member_id):
+    # 只有管理员和经理才能移除团队成员
+    if current_user.role not in [0, 1]:
+        return jsonify({'error': '权限不足'}), 403
+
+    # 验证领导者是否存在并具有正确的角色
+    leader = User.query.get_or_404(leader_id)
+    if leader.role != 2:  # Team Leader role
+        return jsonify({'error': '指定的用户不是组长'}), 400
+
+    # 验证成员是否存在并分配给此领导
+    member = User.query.get_or_404(member_id)
+    if member.team_leader_id != leader_id:
+        return jsonify({'error': '该组员不属于此组长'}), 400
+
+    try:
+        #删除团队领导关联
+        member.team_leader_id = None
+        db.session.commit()
+        return jsonify({'message': '组员移除成功'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# 让所有团队领导及其团队成员
+@leader_bp.route('/team-leaders', methods=['GET'])
+@token_required
+def get_all_team_leaders(current_user):
+    # 只有管理员和经理可以查看所有团队负责人
+    if current_user.role not in [0, 1]:
+        return jsonify({'error': '权限不足'}), 403
+
+    # 获取所有团队负责人
+    team_leaders = User.query.filter_by(role=2).all()
+
+    result = []
+    for leader in team_leaders:
+        # 获取此领导者的所有团队成员
+        team_members = User.query.filter_by(team_leader_id=leader.id).all()
+
+        leader_data = {
+            'id': leader.id,
+            'username': leader.username,
+            'team_members': [{
+                'id': member.id,
+                'username': member.username
+            } for member in team_members]
+        }
+        result.append(leader_data)
+
+    return jsonify({'team_leaders': result})

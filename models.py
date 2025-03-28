@@ -223,28 +223,6 @@ class StageTask(db.Model):
 
 
 # 编辑时间跟踪表
-# class EditTimeTracking(db.Model):
-#     __tablename__ = 'edit_time_tracking'
-#
-#     id = db.Column(db.Integer, primary_key=True)
-#     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
-#     # user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-#     user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
-#     edit_type = db.Column(db.String(20), nullable=False)  # 'stage' or 'task'
-#     start_time = db.Column(db.DateTime, nullable=False)
-#     end_time = db.Column(db.DateTime, nullable=False)
-#     duration = db.Column(db.Integer, nullable=False)  # 持续时间（秒）
-#     stage_id = db.Column(db.Integer, db.ForeignKey('project_stages.id'), nullable=True)
-#     task_id = db.Column(db.Integer, db.ForeignKey('stage_tasks.id'), nullable=True)
-#
-#     # 关系
-#     project = db.relationship('Project', backref='edit_tracks')
-#     # user = db.relationship('User', backref='edit_tracks')
-#     user = db.relationship('User', backref=db.backref('edit_tracks', passive_deletes=True))
-#     stage = db.relationship('ProjectStage', backref='edit_tracks')
-#     task = db.relationship('StageTask', backref='edit_tracks')
-
-
 class EditTimeTracking(db.Model):
     __tablename__ = 'edit_time_tracking'
 
@@ -316,6 +294,7 @@ class TaskProgressUpdate(db.Model):
     progress = db.Column(db.Integer, nullable=False)  # 进度百分比
     description = db.Column(db.String(255), nullable=True)  # 更新内容说明
     created_at = db.Column(db.DateTime, default=datetime.now)  # 更新时间
+    recorder_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)  # 记录人ID
     # 关系
     task = db.relationship('StageTask', back_populates='progress_updates')
 

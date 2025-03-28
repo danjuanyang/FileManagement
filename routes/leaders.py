@@ -505,7 +505,7 @@ def create_user(current_user):
         return jsonify({'error': str(e)}), 500
 
 
-# 修改用户
+# 更新用户
 @leader_bp.route('/users/<int:user_id>', methods=['PUT'])
 @token_required
 def update_user(current_user, user_id):
@@ -528,6 +528,22 @@ def update_user(current_user, user_id):
         if 'role' in data:
             user.role = data['role']
 
+        # 明确处理团队领导关系
+        if 'team_leader_id' in data:
+            # 如果传入null或None，则清除团队领导关系
+            if data['team_leader_id'] is None:
+                user.team_leader_id = None
+                print(f"已解除用户 {user.username} 的团队领导关系")
+            else:
+                # 验证团队领导是否存在并具有正确的角色
+                leader = User.query.get(data['team_leader_id'])
+                if not leader:
+                    return jsonify({'error': '指定的团队领导不存在'}), 400
+                if leader.role != 2:  # 团队领导角色
+                    return jsonify({'error': '指定的用户不是团队领导'}), 400
+                user.team_leader_id = data['team_leader_id']
+                print(f"已将用户 {user.username} 分配给团队领导 {leader.username}")
+
         db.session.commit()
 
         return jsonify({
@@ -535,10 +551,10 @@ def update_user(current_user, user_id):
             'user': {
                 'id': user.id,
                 'username': user.username,
-                'role': user.role
+                'role': user.role,
+                'team_leader_id': user.team_leader_id
             }
         })
-
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
@@ -704,7 +720,7 @@ def get_team_members(current_user):
         return jsonify({'error': '权限不足'}), 403
 
     # 查询团队成员
-    team_members = User.query.filter_by(role=3).all()  # Role 3 = Team Member
+    team_members = User.query.filter_by(role=3).all()
 
     return jsonify({
         'team_members': [{
@@ -724,7 +740,7 @@ def get_my_projects(current_user):
     if current_user.role != 2:  # 团队领导角色
         return jsonify({'error': '权限不足'}), 403
 
-    # Get projects assigned to this team leader
+    # 将项目分配给此团队负责人
     projects = Project.query.filter_by(employee_id=current_user.id).all()
 
     return jsonify({
@@ -793,18 +809,38 @@ def assign_members_to_leader(current_user, leader_id):
 
     # 验证领导者是否存在并具有正确的角色
     leader = User.query.get_or_404(leader_id)
-    if leader.role != 2:  # Team Leader role
+    if leader.role != 2:
         return jsonify({'error': '指定的用户不是组长'}), 400
 
     try:
-        # 首先清除现有团队成员（可选）
-        # User.query.filter_by(team_leader_id=leader_id).update({'team_leader_id': None})
+        # 获取当前已分配给该组长的所有组员
+        current_members = User.query.filter_by(team_leader_id=leader_id).all()
+        current_member_ids = [member.id for member in current_members]
 
-        #分配新团队成员
-        for member_id in member_ids:
+        print(f"组长ID {leader_id} 当前组员: {current_member_ids}")
+        print(f"请求分配的新组员: {member_ids}")
+
+        # 找出需要移除的组员 (在当前列表但不在新列表中)
+        to_remove = [mid for mid in current_member_ids if mid not in member_ids]
+        # 找出需要添加的组员 (在新列表但不在当前列表中)
+        to_add = [mid for mid in member_ids if mid not in current_member_ids]
+
+        print(f"需要移除的组员: {to_remove}")
+        print(f"需要添加的组员: {to_add}")
+
+        # 清除不再属于该组长的组员
+        if to_remove:
+            User.query.filter(User.id.in_(to_remove)).update(
+                {User.team_leader_id: None},
+                synchronize_session=False
+            )
+            print(f"已解除 {len(to_remove)} 名组员与组长ID {leader_id} 的关联")
+
+        # 添加新组员
+        for member_id in to_add:
             member = User.query.get_or_404(member_id)
 
-            #检查用户是否为团队成员
+            # 检查用户是否为团队成员
             if member.role != 3:  # 团队成员角色
                 return jsonify({'error': f'用户 {member.username} 不是组员角色'}), 400
 
@@ -814,12 +850,18 @@ def assign_members_to_leader(current_user, leader_id):
 
             # 分配给此领导者
             member.team_leader_id = leader_id
+            print(f"已将组员ID {member_id} 分配给组长ID {leader_id}")
 
         db.session.commit()
-        return jsonify({'message': '组员分配成功'}), 200
+        return jsonify({
+            'message': '组员分配成功',
+            'added': len(to_add),
+            'removed': len(to_remove)
+        }), 200
 
     except Exception as e:
         db.session.rollback()
+        print(f"分配组员失败: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -842,13 +884,26 @@ def remove_member_from_leader(current_user, leader_id, member_id):
         return jsonify({'error': '该组员不属于此组长'}), 400
 
     try:
-        #删除团队领导关联
+        # 删除团队领导关联
+        print(f"正在移除组员ID {member_id} 与组长ID {leader_id} 的关联")
         member.team_leader_id = None
         db.session.commit()
+
+        # 验证关联是否确实被删除
+        member = User.query.get(member_id)
+        if member.team_leader_id is not None:
+            print(f"警告: 组员ID {member_id} 的team_leader_id仍然是 {member.team_leader_id}")
+            # 强制再次尝试删除
+            User.query.filter_by(id=member_id).update({'team_leader_id': None})
+            db.session.commit()
+        else:
+            print(f"成功: 组员ID {member_id} 的team_leader_id已成功设置为None")
+
         return jsonify({'message': '组员移除成功'}), 200
 
     except Exception as e:
         db.session.rollback()
+        print(f"移除组员失败: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 

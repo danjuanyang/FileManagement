@@ -18,8 +18,24 @@ CORS(projectplan_bp, resources={r"/api/*": {"origins": "*"}})
 # 获取项目的所有子项目
 @projectplan_bp.route('/subprojects/<int:project_id>', methods=['GET'])
 @track_activity
-def get_project_subprojects(project_id):
-    subprojects = Subproject.query.filter_by(project_id=project_id).all()
+@token_required
+def get_project_subprojects(current_user, project_id):
+    # 检查项目是否存在
+    project = Project.query.get_or_404(project_id)
+
+    # 权限检查
+    if current_user.role in [0, 1]:  # 管理员或经理可以看所有
+        subprojects = Subproject.query.filter_by(project_id=project_id).all()
+    elif current_user.role == 2:  # 组长只能看自己的项目
+        if project.employee_id != current_user.id:
+            return jsonify({'error': '您没有权限查看此项目的子项目'}), 403
+        subprojects = Subproject.query.filter_by(project_id=project_id).all()
+    else:  # 组员只能看分配给自己的
+        subprojects = Subproject.query.filter_by(
+            project_id=project_id,
+            employee_id=current_user.id
+        ).all()
+
     return jsonify([{
         'id': subproject.id,
         'project_id': subproject.project_id,
@@ -91,7 +107,7 @@ def update_subproject(current_user, id):
         subproject = Subproject.query.get_or_404(id)
 
         data = request.get_json()
-        # 添加具有验证的其他字段
+        # 添加具有验证的字段
         subproject.name = data.get('name', subproject.name)
         subproject.description = data.get('description', subproject.description)
         # 使用验证更新字段
@@ -101,13 +117,11 @@ def update_subproject(current_user, id):
             subproject.start_date = datetime.strptime(data['startDate'], '%Y-%m-%d')
         if 'deadline' in data:
             subproject.deadline = datetime.strptime(data['deadline'], '%Y-%m-%d')
+        if 'employee_id' in data:
+            subproject.employee_id = data['employee_id']
         subproject.progress = data.get('progress', subproject.progress)
         subproject.status = data.get('status', subproject.status)
 
-        # 重要说明：将父项目状态更新为 “in_progress”
-        # project = Project.query.get(data['projectId'])
-        # if project:
-        #     project.status = "in_progress"
         db.session.commit()
         return jsonify({'message': '子项目更新成功'}), 200
     except Exception as e:
@@ -126,11 +140,24 @@ def delete_subproject(id):
 
 
 # ------------------ 更新的阶段终端节点 ------------------
-
 # 获取子项目的阶段
 @projectplan_bp.route('/stages/subproject/<int:subproject_id>', methods=['GET'])
 @track_activity
-def get_subproject_stages(subproject_id):
+@token_required
+def get_subproject_stages(current_user, subproject_id):
+    # 获取子项目信息
+    subproject = Subproject.query.get_or_404(subproject_id)
+
+    # 权限检查 - 组员只能查看分配给自己的子项目
+    if current_user.role == 3:  # 组员
+        if subproject.employee_id != current_user.id:
+            return jsonify({'error': '您没有权限查看此子项目的阶段'}), 403
+    # 组长只能查看自己项目下的子项目
+    elif current_user.role == 2:  # 组长
+        project = Project.query.get(subproject.project_id)
+        if project.employee_id != current_user.id:
+            return jsonify({'error': '您没有权限查看此项目的子项目阶段'}), 403
+
     stages = ProjectStage.query.filter_by(subproject_id=subproject_id).all()
     return jsonify([{
         'id': stage.id,
@@ -160,7 +187,24 @@ def get_subproject_stages(subproject_id):
 # 保留旧端点以实现向后兼容性
 @projectplan_bp.route('/stages/<int:project_id>', methods=['GET'])
 @track_activity
-def get_project_stages(project_id):
+@token_required
+def get_project_stages(current_user, project_id):
+    # 权限检查 - 管理员可以查看所有项目的阶段
+    if current_user.role not in [0, 1]:  # 不是管理员或经理
+        # 组长只能查看自己的项目
+        if current_user.role == 2:  # 组长
+            project = Project.query.get_or_404(project_id)
+            if project.employee_id != current_user.id:
+                return jsonify({'error': '您没有权限查看此项目的阶段'}), 403
+
+        # 组员只能查看分配给自己的子项目
+        elif current_user.role == 3:  # 组员
+            # 获取项目下所有子项目
+            subprojects = Subproject.query.filter_by(project_id=project_id).all()
+            # 检查是否有分配给该组员的子项目
+            if not any(sp.employee_id == current_user.id for sp in subprojects):
+                return jsonify({'error': '您没有权限查看此项目的阶段'}), 403
+
     # 现在，这将返回给定项目的所有子项目中的所有阶段
     stages = ProjectStage.query.filter_by(project_id=project_id).all()
     return jsonify([{
@@ -258,8 +302,23 @@ def create_project_stage(current_user):
 # 获取子项目的文件
 @projectplan_bp.route('/files/subproject/<int:subproject_id>', methods=['GET'])
 @track_activity
-def get_subproject_files(subproject_id):
+@token_required
+def get_subproject_files(current_user, subproject_id):
     try:
+        # 获取子项目信息
+        subproject = Subproject.query.get_or_404(subproject_id)
+
+        # 权限检查
+        if current_user.role > 2:  # 组员
+            # 组员只能查看分配给自己的子项目的文件
+            if subproject.employee_id != current_user.id:
+                return jsonify({'error': '您没有权限查看此子项目的文件'}), 403
+        elif current_user.role == 2:  # 组长
+            # 组长只能查看自己负责的项目下的子项目文件
+            project = Project.query.get(subproject.project_id)
+            if project.employee_id != current_user.id:
+                return jsonify({'error': '您没有权限查看此子项目的文件'}), 403
+
         files = ProjectFile.query.filter_by(subproject_id=subproject_id).all()
 
         subproject = Subproject.query.get(subproject_id)
@@ -395,13 +454,39 @@ def get_all_files():
 # 创建任务
 @projectplan_bp.route('/tasks', methods=['POST'])
 @track_activity
-def create_task():
+@token_required
+def create_task(current_user):
     data = request.get_json()
     tracking_id = data.pop('trackingId', None)
+    stage_id = data['stageId']
+
+    # 获取阶段信息用于权限检查
+    stage = ProjectStage.query.get_or_404(stage_id)
+    if not stage:
+        return jsonify({'error': '未找到指定的阶段'}), 404
+
+    # 获取子项目和项目信息
+    subproject = Subproject.query.get(stage.subproject_id)
+    if not subproject:
+        return jsonify({'error': '未找到关联的子项目'}), 404
+
+    project = Project.query.get(stage.project_id)
+    if not project:
+        return jsonify({'error': '未找到关联的项目'}), 404
+
+    # 权限检查
+    if current_user.role > 2:  # 组员
+        # 组员只能为分配给自己的子项目创建任务
+        if subproject.employee_id != current_user.id:
+            return jsonify({'error': '您没有权限为此阶段创建任务'}), 403
+    elif current_user.role == 2:  # 组长
+        # 组长只能为自己负责的项目下的阶段创建任务
+        if project.employee_id != current_user.id:
+            return jsonify({'error': '您没有权限为此阶段创建任务'}), 403
 
     try:
         task = StageTask(
-            stage_id=data['stageId'],
+            stage_id=stage_id,
             name=data['name'],
             description=data.get('description', ''),
             due_date=datetime.strptime(data['dueDate'], '%Y-%m-%d'),
@@ -440,8 +525,33 @@ def create_task():
 # 更新任务
 @projectplan_bp.route('/tasks/<int:id>', methods=['PUT'])
 @track_activity
-def update_task(id):
+@token_required
+def update_task(current_user, id):
     task = StageTask.query.get_or_404(id)
+
+    # 获取任务所属的阶段、子项目和项目
+    stage = ProjectStage.query.get(task.stage_id)
+    if not stage:
+        return jsonify({'error': '未找到任务所属的阶段'}), 404
+
+    subproject = Subproject.query.get(stage.subproject_id)
+    if not subproject:
+        return jsonify({'error': '未找到关联的子项目'}), 404
+
+    project = Project.query.get(stage.project_id)
+    if not project:
+        return jsonify({'error': '未找到关联的项目'}), 404
+
+    # 权限检查
+    if current_user.role > 2:  # 组员
+        # 组员只能更新分配给自己的子项目的任务
+        if subproject.employee_id != current_user.id:
+            return jsonify({'error': '您没有权限更新此任务'}), 403
+    elif current_user.role == 2:  # 组长
+        # 组长只能更新自己负责的项目下的任务
+        if project.employee_id != current_user.id:
+            return jsonify({'error': '您没有权限更新此任务'}), 403
+
     data = request.get_json()
 
     if 'name' in data:
@@ -466,17 +576,58 @@ def update_task(id):
 # 删除任务
 @projectplan_bp.route('/tasks/<int:id>', methods=['DELETE'])
 @track_activity
-def delete_task(id):
+@token_required
+def delete_task(current_user, id):
     task = StageTask.query.get_or_404(id)
     stage_id = task.stage_id
 
-    db.session.delete(task)
-    db.session.commit()
+    # Get task's stage, subproject, and project
+    stage = ProjectStage.query.get(task.stage_id)
+    if not stage:
+        return jsonify({'error': '未找到任务所属的阶段'}), 404
 
-    # 删除任务后更新阶段进度
-    update_stage_progress(stage_id)
+    subproject = Subproject.query.get(stage.subproject_id)
+    if not subproject:
+        return jsonify({'error': '未找到关联的子项目'}), 404
 
-    return jsonify({'message': '任务删除成功'}), 200
+    project = Project.query.get(stage.project_id)
+    if not project:
+        return jsonify({'error': '未找到关联的项目'}), 404
+
+    # 权限检查
+    if current_user.role > 2:  # Team member
+        # Team members can only delete tasks from subprojects assigned to them
+        if subproject.employee_id != current_user.id:
+            return jsonify({'error': '您没有权限删除此任务'}), 403
+        elif task.status == 'completed':
+            return jsonify({'error': '您没有权限删除已完成的任务'}), 403
+        else:
+            # Team member has permission to delete the task
+            db.session.delete(task)
+            db.session.commit()
+
+            # Update stage progress after task deletion
+            update_stage_progress(stage_id)
+
+            return jsonify({'message': '任务删除成功'}), 200
+    elif current_user.role == 2:  # Team leader
+        # 团队主管可以删除其项目中的任何任务
+        db.session.delete(task)
+        db.session.commit()
+
+        # 删除任务后更新阶段进度
+        update_stage_progress(stage_id)
+
+        return jsonify({'message': '任务删除成功'}), 200
+    else:  # 管理员或其他角色
+        # 管理员可以删除任何任务
+        db.session.delete(task)
+        db.session.commit()
+
+        # 删除任务后更新阶段进度
+        update_stage_progress(stage_id)
+
+        return jsonify({'message': '任务删除成功'}), 200
 
 
 # ------------------ 跟踪终端节点 ------------------
@@ -621,24 +772,54 @@ def export_project_plan(project_id):
 
 # ------------------ 帮助程序函数------------------
 
-# 更新阶段进度
-def update_stage_progress(stage_id):
-    stage = ProjectStage.query.get(stage_id)
-    if not stage or not stage.tasks:
-        return
+# 更新阶段数据
+@projectplan_bp.route('/stages/<int:id>', methods=['PUT'])
+@track_activity
+@token_required
+def update_stage_progress(current_user, id):
+    stage = ProjectStage.query.get_or_404(id)
 
-    total_progress = sum(task.progress for task in stage.tasks)
-    stage.progress = total_progress // len(stage.tasks)
+    # 获取子项目和项目信息用于权限检查
+    subproject = Subproject.query.get(stage.subproject_id)
+    if not subproject:
+        return jsonify({'error': '未找到关联的子项目'}), 404
 
-    if all(task.status == 'completed' for task in stage.tasks):
-        stage.status = 'completed'
-    elif any(task.status == 'in_progress' for task in stage.tasks):
-        stage.status = 'in_progress'
+    project = Project.query.get(stage.project_id)
+    if not project:
+        return jsonify({'error': '未找到关联的项目'}), 404
+
+    # 权限检查
+    if current_user.role > 2:  # 组员
+        # 组员只能更新分配给自己的子项目的阶段
+        if subproject.employee_id != current_user.id:
+            return jsonify({'error': '您没有权限更新此阶段'}), 403
+    elif current_user.role == 2:  # 组长
+        # 组长只能更新自己负责的项目下的阶段
+        if project.employee_id != current_user.id:
+            return jsonify({'error': '您没有权限更新此阶段'}), 403
+
+    data = request.get_json()
+
+    if 'name' in data:
+        stage.name = data['name']
+    if 'description' in data:
+        stage.description = data['description']
+    if 'startDate' in data:
+        stage.start_date = datetime.strptime(data['startDate'], '%Y-%m-%d')
+    if 'endDate' in data:
+        stage.end_date = datetime.strptime(data['endDate'], '%Y-%m-%d')
+    if 'progress' in data:
+        stage.progress = data['progress']
+    if 'status' in data:
+        stage.status = data['status']
 
     db.session.commit()
 
-    # 更新子项目进度
-    update_subproject_progress(stage.subproject_id)
+    # 如果状态变为完成，可能需要更新子项目状态
+    if stage.status == 'completed':
+        update_subproject_progress(stage.subproject_id)
+
+    return jsonify({'message': '阶段更新成功'}), 200
 
 
 # 更新阶段数据
@@ -749,12 +930,29 @@ def assign_subproject(current_user, id):
 @track_activity
 @token_required
 def get_team_members(current_user):
-    # 只有管理员、经理和团队负责人可以访问此内容
+    # 只有超管，管理员和团队领导才能访问此内容
     if current_user.role not in [0, 1, 2]:
         return jsonify({'error': '权限不足'}), 403
 
-    # 查询团队成员
-    team_members = User.query.filter_by(role=3).all()  # Role 3 =团队成员
+    # 从请求参数中获取团队领导 ID
+    leader_id = request.args.get('leader_id', type=int)
+
+    # 如果是团队负责人，则仅返回分配给他们的成员
+    if current_user.role == 2:
+        # 如果提供了 leader_id 并且与当前用户匹配，则使用它
+        if leader_id and leader_id == current_user.id:
+            # 使用 team_leader_id 关系的直接查询
+            team_members = User.query.filter_by(team_leader_id=leader_id, role=3).all()
+        else:
+            # If no leader_id or doesn't match, use current user's ID
+            team_members = User.query.filter_by(team_leader_id=current_user.id, role=3).all()
+    else:
+        # 对于管理员和经理，如果提供了 leader_id，请按此进行筛选
+        if leader_id:
+            team_members = User.query.filter_by(team_leader_id=leader_id, role=3).all()
+        else:
+            # 否则返回所有团队成员
+            team_members = User.query.filter_by(role=3).all()
 
     return jsonify({
         'team_members': [{

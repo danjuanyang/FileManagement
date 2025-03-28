@@ -661,11 +661,15 @@ def get_report_data(current_user):
 
 
 # 创建任务进度更新 - 更新以添加更多关联字段
+# 创建任务进度更新 - 更新以添加记录人ID
 @employee_bp.route('/tasks/<int:task_id>/progress-updates', methods=['POST'])
 @track_activity
 def add_task_progress_update(task_id):
     task = StageTask.query.get_or_404(task_id)
     data = request.get_json()
+
+    # 获取当前用户ID
+    current_user_id = get_employee_id()
 
     if 'progress' not in data or 'description' not in data:
         return jsonify({'error': '缺少必要字段：progress 或 description'}), 400
@@ -674,11 +678,12 @@ def add_task_progress_update(task_id):
     if data['progress'] < task.progress:
         return jsonify({'error': '任务进度不能回退'}), 400
 
-    # 创建进度更新记录
+    # 创建进度更新记录，添加记录人ID
     update = TaskProgressUpdate(
         task_id=task_id,
         progress=data['progress'],
-        description=data['description']
+        description=data['description'],
+        recorder_id=current_user_id  # 添加记录人ID
     )
 
     # 更新任务的当前进度
@@ -756,18 +761,32 @@ def get_subproject_tasks(subproject_id):
 
 
 # 获取任务的进度更新记录 - 保持不变
+# 获取任务的进度更新记录 - 包含记录人信息
 @employee_bp.route('/tasks/<int:task_id>/progress-updates', methods=['GET'])
 @track_activity
 def get_task_progress_updates(task_id):
     task = StageTask.query.get_or_404(task_id)
     updates = TaskProgressUpdate.query.filter_by(task_id=task_id).order_by(TaskProgressUpdate.created_at.desc()).all()
 
-    return jsonify([{
-        'id': update.id,
-        'progress': update.progress,
-        'description': update.description,
-        'created_at': update.created_at.isoformat()
-    } for update in updates])
+    result = []
+    for update in updates:
+        update_data = {
+            'id': update.id,
+            'progress': update.progress,
+            'description': update.description,
+            'created_at': update.created_at.isoformat(),
+            'recorder_id': update.recorder_id
+        }
+
+        # 如果有记录人，添加记录人的用户名
+        if update.recorder_id:
+            recorder = User.query.get(update.recorder_id)
+            if recorder:
+                update_data['recorder_name'] = recorder.username
+
+        result.append(update_data)
+
+    return jsonify(result)
 
 
 # 检测任务编辑时间 - 保持不变
@@ -1097,7 +1116,6 @@ def search_resources(current_user):
 @token_required
 def change_user_password(current_user):
     try:
-        # user = User.query.get_or_404(user_id)
         data = request.get_json()
 
         # 验证必要字段
@@ -1139,63 +1157,173 @@ def change_user_password(current_user):
 
 
 # -----------------------------------权限--------------------------------------
-# In employees.py, add a new endpoint
+
 @employee_bp.route('/my-subprojects', methods=['GET'])
 @track_activity
 @token_required
 def get_my_subprojects(current_user):
     # 仅团队成员可以访问此端点
-    if current_user.role != 3:  # Team Member role
+    if current_user.role != 3:
         return jsonify({'error': '权限不足'}), 403
 
-    # 获取分配给此团队成员的子项目
-    subprojects = Subproject.query.filter_by(employee_id=current_user.id).all()
+    try:
+        # 获取分配给此团队成员的子项目
+        subprojects = Subproject.query.filter_by(employee_id=current_user.id).all()
 
-    # 即使没有分配的子项目，也返回空数组而不是错误
-    if not subprojects:
-        return jsonify([])
+        # 检查此组员是否还属于某个组长团队
+        if current_user.team_leader_id is None:
+            # 如果组员不再属于任何组长，需要解除其与所有子项目的关联
+            for subproject in subprojects:
+                print(f"解除组员ID {current_user.id} 与子项目ID {subproject.id} 的关联")
+                subproject.employee_id = None
 
-    return jsonify([{
-        'id': sp.id,
-        'name': sp.name,
-        'description': sp.description,
-        'project_id': sp.project_id,
-        'project_name': sp.project.name if sp.project else "未知项目",
-        'start_date': sp.start_date.strftime('%Y-%m-%d'),
-        'deadline': sp.deadline.strftime('%Y-%m-%d'),
-        'progress': sp.progress,
-        'status': sp.status,
-        'employee_id': sp.employee_id,
-        'stages': [{
-            'id': s.id,
-            'name': s.name,
-            'description': s.description,
-            'start_date': s.start_date.strftime('%Y-%m-%d'),
-            'end_date': s.end_date.strftime('%Y-%m-%d'),
-            'progress': s.progress,
-            'status': s.status,
-            'tasks': [{
-                'id': t.id,
-                'name': t.name,
-                'description': t.description,
-                'due_date': t.due_date.strftime('%Y-%m-%d'),
-                'status': t.status,
-                'progress': t.progress
-            } for t in s.tasks]
-        } for s in sp.stages]
-    } for sp in subprojects])
+            # 提交更改到数据库
+            db.session.commit()
+
+            # 清空子项目列表，因为现在应该没有分配的子项目了
+            subprojects = []
+
+            print(f"组员ID {current_user.id} 已不再属于任何组长，已解除所有子项目关联")
+            return jsonify([])
+
+        # 即使没有分配的子项目，也返回空数组而不是错误
+        if not subprojects:
+            return jsonify([])
+
+        return jsonify([{
+            'id': sp.id,
+            'name': sp.name,
+            'description': sp.description,
+            'project_id': sp.project_id,
+            'project_name': sp.project.name if sp.project else "未知项目",
+            'start_date': sp.start_date.strftime('%Y-%m-%d'),
+            'deadline': sp.deadline.strftime('%Y-%m-%d'),
+            'progress': sp.progress,
+            'status': sp.status,
+            'employee_id': sp.employee_id,
+            'stages': [{
+                'id': s.id,
+                'name': s.name,
+                'description': s.description,
+                'start_date': s.start_date.strftime('%Y-%m-%d'),
+                'end_date': s.end_date.strftime('%Y-%m-%d'),
+                'progress': s.progress,
+                'status': s.status,
+                'tasks': [{
+                    'id': t.id,
+                    'name': t.name,
+                    'description': t.description,
+                    'due_date': t.due_date.strftime('%Y-%m-%d'),
+                    'status': t.status,
+                    'progress': t.progress
+                } for t in s.tasks]
+            } for s in sp.stages]
+        } for sp in subprojects])
+    except Exception as e:
+        print(f"获取组员子项目时出错: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 
-# 在employees.py中添加这个新端点
+# 确保是组员角色
+@employee_bp.route('/assigned-projects/dashboard', methods=['GET'])
+@track_activity
+@token_required
+def get_assigned_projects_dashboard(current_user):
+    # 确保是组员角色
+    if current_user.role != 3:
+        return jsonify({'error': '此端点仅供组员访问'}), 403
+
+    try:
+        # 检查此组员是否还属于某个组长团队
+        if current_user.team_leader_id is None:
+            # 如果组员不再属于任何组长，需要解除其与所有子项目的关联
+            assigned_subprojects = Subproject.query.filter_by(employee_id=current_user.id).all()
+            for subproject in assigned_subprojects:
+                print(f"解除组员ID {current_user.id} 与子项目ID {subproject.id} 的关联")
+                subproject.employee_id = None
+
+            # 提交更改到数据库
+            db.session.commit()
+
+            print(f"组员ID {current_user.id} 已不再属于任何组长，已解除所有子项目关联")
+            return jsonify({
+                'has_assignments': False,
+                'message': '您当前没有被分配任何子项目'
+            })
+
+        # 获取分配给此组员的所有子项目
+        assigned_subprojects = Subproject.query.filter_by(employee_id=current_user.id).all()
+
+        # 如果没有分配的子项目，返回空响应
+        if not assigned_subprojects:
+            return jsonify({
+                'has_assignments': False,
+                'message': '您当前没有被分配任何子项目'
+            })
+
+        # 准备返回的数据
+        result = {
+            'has_assignments': True,
+            'subprojects': []
+        }
+
+        for subproject in assigned_subprojects:
+            # 获取父项目信息
+            project = Project.query.get(subproject.project_id)
+            project_name = project.name if project else "未知项目"
+
+            # 获取子项目的阶段
+            stages = ProjectStage.query.filter_by(subproject_id=subproject.id).all()
+
+            # 构建子项目数据
+            subproject_data = {
+                'id': subproject.id,
+                'name': subproject.name,
+                'description': subproject.description,
+                'project_id': subproject.project_id,
+                'project_name': project_name,
+                'startDate': subproject.start_date.strftime('%Y-%m-%d'),
+                'deadline': subproject.deadline.strftime('%Y-%m-%d'),
+                'progress': subproject.progress,
+                'status': subproject.status,
+                'stages_count': len(stages)
+            }
+
+            result['subprojects'].append(subproject_data)
+
+        return jsonify(result)
+
+    except Exception as e:
+        print(f"获取组员分配的项目数据时出错: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
 @employee_bp.route('/assigned-projects', methods=['GET'])
 @track_activity
 @token_required
 def get_assigned_projects_data(current_user):
     # 确保是组员角色
-    if current_user.role != 3:  # 3 = Team Member role
+    if current_user.role != 3:
         return jsonify({'error': '此端点仅供组员访问'}), 403
 
     try:
+        # 检查此组员是否还属于某个组长团队
+        if current_user.team_leader_id is None:
+            # 如果组员不再属于任何组长，需要解除其与所有子项目的关联
+            assigned_subprojects = Subproject.query.filter_by(employee_id=current_user.id).all()
+            for subproject in assigned_subprojects:
+                print(f"解除组员ID {current_user.id} 与子项目ID {subproject.id} 的关联")
+                subproject.employee_id = None
+
+            # 提交更改到数据库
+            db.session.commit()
+
+            print(f"组员ID {current_user.id} 已不再属于任何组长，已解除所有子项目关联")
+            return jsonify({
+                'has_assignments': False,
+                'subprojects': []
+            })
+
         # 获取分配给此组员的所有子项目
         assigned_subprojects = Subproject.query.filter_by(employee_id=current_user.id).all()
 
@@ -1268,63 +1396,6 @@ def get_assigned_projects_data(current_user):
                 'project_name': project.name if project else "未知项目",
                 'stages': stages_data
             })
-
-        return jsonify(result)
-
-    except Exception as e:
-        print(f"获取组员分配的项目数据时出错: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-
-# 确保是组员角色
-@employee_bp.route('/assigned-projects/dashboard', methods=['GET'])
-@track_activity
-@token_required
-def get_assigned_projects_dashboard(current_user):
-    # 确保是组员角色
-    if current_user.role != 3:  # 3 = Team Member role
-        return jsonify({'error': '此端点仅供组员访问'}), 403
-
-    try:
-        # 获取分配给此组员的所有子项目
-        assigned_subprojects = Subproject.query.filter_by(employee_id=current_user.id).all()
-
-        # 如果没有分配的子项目，返回空响应
-        if not assigned_subprojects:
-            return jsonify({
-                'has_assignments': False,
-                'message': '您当前没有被分配任何子项目'
-            })
-
-        # 准备返回的数据
-        result = {
-            'has_assignments': True,
-            'subprojects': []
-        }
-
-        for subproject in assigned_subprojects:
-            # 获取父项目信息
-            project = Project.query.get(subproject.project_id)
-            project_name = project.name if project else "未知项目"
-
-            # 获取子项目的阶段
-            stages = ProjectStage.query.filter_by(subproject_id=subproject.id).all()
-
-            # 构建子项目数据
-            subproject_data = {
-                'id': subproject.id,
-                'name': subproject.name,
-                'description': subproject.description,
-                'project_id': subproject.project_id,
-                'project_name': project_name,
-                'startDate': subproject.start_date.strftime('%Y-%m-%d'),
-                'deadline': subproject.deadline.strftime('%Y-%m-%d'),
-                'progress': subproject.progress,
-                'status': subproject.status,
-                'stages_count': len(stages)
-            }
-
-            result['subprojects'].append(subproject_data)
 
         return jsonify(result)
 

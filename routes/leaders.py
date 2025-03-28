@@ -8,7 +8,7 @@ from sqlalchemy import desc
 from user_agents import parse
 
 from models import db, Project, ProjectFile, User, StageTask, ProjectStage, EditTimeTracking, ReportClockinDetail, \
-    ReportClockin, UserSession
+    ReportClockin, UserSession, TaskProgressUpdate, Subproject
 from datetime import datetime
 
 from routes.employees import token_required
@@ -302,7 +302,8 @@ def get_report_clockin_data(current_user):
         return jsonify({'error': str(e)}), 500
 
 
-# 项目列表
+# 2025年3月28日15:28:03
+# 项目列表，新版本，包含子项目，任务更新负责人
 @leader_bp.route('/projectlist', methods=['GET'])
 @track_activity
 @token_required
@@ -317,8 +318,72 @@ def get_project_list(current_user):
         # 准备响应数据
         project_list = []
         for project in projects:
-            # 检索每个项目的阶段
-            stages = ProjectStage.query.filter_by(project_id=project.id).all()
+            # 检索每个项目的子项目
+            subprojects = Subproject.query.filter_by(project_id=project.id).all()
+            subproject_list = []
+
+            for subproject in subprojects:
+                # 检索子项目的负责人信息
+                employee = User.query.get(subproject.employee_id) if subproject.employee_id else None
+
+                # 检索子项目的阶段
+                stages = ProjectStage.query.filter_by(subproject_id=subproject.id).all()
+                stage_list = []
+
+                for stage in stages:
+                    # 检索每个阶段的任务
+                    tasks = StageTask.query.filter_by(stage_id=stage.id).all()
+                    task_list = []
+
+                    for task in tasks:
+                        # 检索任务的进度更新
+                        progress_updates = TaskProgressUpdate.query.filter_by(task_id=task.id).order_by(
+                            TaskProgressUpdate.created_at.desc()).all()
+                        update_list = [{
+                            'id': update.id,
+                            'progress': update.progress,
+                            'description': update.description,
+                            'created_at': update.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                            'recorder_id': update.recorder_id,
+                            'recorder_name': User.query.get(update.recorder_id).username if update.recorder_id else None
+                        } for update in progress_updates]
+
+                        task_list.append({
+                            'id': task.id,
+                            'name': task.name,
+                            'description': task.description,
+                            'due_date': task.due_date.strftime('%Y-%m-%d') if task.due_date else None,
+                            'status': task.status,
+                            'progress': task.progress,
+                            'progress_updates': update_list
+                        })
+
+                    stage_list.append({
+                        'id': stage.id,
+                        'name': stage.name,
+                        'description': stage.description,
+                        'start_date': stage.start_date.strftime('%Y-%m-%d') if stage.start_date else None,
+                        'end_date': stage.end_date.strftime('%Y-%m-%d') if stage.end_date else None,
+                        'progress': stage.progress,
+                        'status': stage.status,
+                        'tasks': task_list
+                    })
+
+                subproject_list.append({
+                    'id': subproject.id,
+                    'name': subproject.name,
+                    'description': subproject.description,
+                    'employee_id': subproject.employee_id,
+                    'employee_name': employee.username if employee else None,
+                    'start_date': subproject.start_date.strftime('%Y-%m-%d') if subproject.start_date else None,
+                    'deadline': subproject.deadline.strftime('%Y-%m-%d') if subproject.deadline else None,
+                    'progress': subproject.progress,
+                    'status': subproject.status,
+                    'stages': stage_list
+                })
+
+            # 检索每个项目的阶段 (现在改为获取未分配到子项目的阶段，如果有的话)
+            stages = ProjectStage.query.filter_by(project_id=project.id, subproject_id=None).all()
             stage_list = []
             for stage in stages:
                 # 检索每个阶段的任务
@@ -350,7 +415,7 @@ def get_project_list(current_user):
                 'file_name': file.file_name,
                 'file_type': file.file_type,
                 'file_path': file.file_path,
-                'upload_user': file.upload_user.username,
+                'upload_user': file.upload_user.username if hasattr(file, 'upload_user') and file.upload_user else None,
                 'upload_date': file.upload_date.strftime('%Y-%m-%d %H:%M:%S')
             } for file in files]
 
@@ -363,6 +428,7 @@ def get_project_list(current_user):
                 'deadline': project.deadline.strftime('%Y-%m-%d') if project.deadline else None,
                 'progress': project.progress,
                 'status': project.status,
+                'subprojects': subproject_list,
                 'stages': stage_list,
                 'files': file_list
             })
@@ -371,6 +437,8 @@ def get_project_list(current_user):
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
 
 
 # 用户管理

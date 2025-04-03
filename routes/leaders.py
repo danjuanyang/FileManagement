@@ -1002,3 +1002,53 @@ def get_all_team_leaders(current_user):
         result.append(leader_data)
 
     return jsonify({'team_leaders': result})
+
+
+# 管理员改密码
+@leader_bp.route('/change-password', methods=['POST'])
+@track_activity
+@token_required
+def change_password(current_user):
+    # 只有管理员和经理才能更改密码
+    if current_user.role not in [0, 1]:
+        return jsonify({'error': '权限不足'}), 403
+    else:
+        try:
+            data = request.get_json()
+
+            # 验证必要字段
+            if not all(k in data for k in ('old_password', 'new_password')):
+                return jsonify({'error': '缺少必要字段'}), 400
+
+            # 验证旧密码是否正确
+            if not current_user.check_password(data['old_password']):
+                return jsonify({'error': '旧密码不正确'}), 400
+
+            # 验证新密码
+            new_password = data['new_password']
+            if len(new_password) < 6:
+                return jsonify({'error': '密码长度必须大于6位'}), 400
+
+            # 验证新密码复杂度（至少包含数字和字母）
+            if not any(c.isdigit() for c in new_password) or not any(c.isalpha() for c in new_password):
+                return jsonify({'error': '密码必须包含数字和字母'}), 400
+
+            # 更新密码
+            current_user.set_password(new_password)
+
+            # 记录活动
+            log_user_activity(
+                user_id=current_user.id,
+                action_type='change_password',
+                action_detail=f'用户修改了密码',
+                resource_type='leader',
+                resource_id=current_user.id
+            )
+
+            db.session.commit()
+
+            return jsonify({'message': '密码修改成功'})
+
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': str(e)}), 500

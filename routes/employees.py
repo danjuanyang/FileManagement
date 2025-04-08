@@ -132,7 +132,7 @@ def get_assigned_projects():
         'description': p.description,
         'start_date': p.start_date.strftime('%Y-%m-%d'),
         'deadline': p.deadline.strftime('%Y-%m-%d'),
-        'progress': p.progress,
+        'progress': f"{p.progress:.2f}" if p.progress else None,
         'status': p.status,
         'subprojects': [{
             'id': sp.id,
@@ -140,7 +140,7 @@ def get_assigned_projects():
             'description': sp.description,
             'start_date': sp.start_date.strftime('%Y-%m-%d'),
             'deadline': sp.deadline.strftime('%Y-%m-%d'),
-            'progress': sp.progress,
+            'progress': f"{sp.progress:.2f}" if sp.progress else None,
             'status': sp.status,
             'stages': [{
                 'id': s.id,
@@ -148,7 +148,7 @@ def get_assigned_projects():
                 'description': s.description,
                 'start_date': s.start_date.strftime('%Y-%m-%d'),
                 'end_date': s.end_date.strftime('%Y-%m-%d'),
-                'progress': s.progress,
+                'progress': f"{s.progress:.2f}" if s.progress else None,
                 'status': s.status,
                 'tasks': [{
                     'id': t.id,
@@ -156,7 +156,7 @@ def get_assigned_projects():
                     'description': t.description,
                     'due_date': t.due_date.strftime('%Y-%m-%d'),
                     'status': t.status,
-                    'progress': t.progress,
+                    'progress': f"{t.progress:.2f}" if t.progress else None,
                     'files': [{
                         'id': f.id is not None,  # 检查文件是否有 ID
                         # 如果没做索引，content为空，却有文件，那么前端就会判断错误没有文件，所以前端按照是否有 ID 来判断是否有文件
@@ -180,7 +180,7 @@ def get_project_details(project_id):
         'description': project.description,
         'start_date': project.start_date.strftime('%Y-%m-%d'),
         'deadline': project.deadline.strftime('%Y-%m-%d'),
-        'progress': project.progress,
+        'progress': f"{project.progress:.2f}" if project.progress else None,
         'status': project.status,
         'employee_id': project.employee_id,
         'subprojects': [{
@@ -189,7 +189,7 @@ def get_project_details(project_id):
             'description': sp.description,
             'start_date': sp.start_date.strftime('%Y-%m-%d'),
             'deadline': sp.deadline.strftime('%Y-%m-%d'),
-            'progress': sp.progress,
+            'progress': f"{sp.progress:.2f}" if sp.progress else None,
             'status': sp.status,
             'stages': [{
                 'id': s.id,
@@ -197,7 +197,7 @@ def get_project_details(project_id):
                 'description': s.description,
                 'start_date': s.start_date.strftime('%Y-%m-%d'),
                 'end_date': s.end_date.strftime('%Y-%m-%d'),
-                'progress': s.progress,
+                'progress': f"{s.progress:.2f}" if s.progress else None,
                 'status': s.status,
                 'tasks': [{
                     'id': t.id,
@@ -205,7 +205,7 @@ def get_project_details(project_id):
                     'description': t.description,
                     'due_date': t.due_date.strftime('%Y-%m-%d'),
                     'status': t.status,
-                    'progress': t.progress
+                    'progress': f"{t.progress:.2f}" if t.progress else None,
                 } for t in s.tasks]
             } for s in sp.stages]
         } for sp in project.subprojects]
@@ -251,7 +251,7 @@ def get_subproject_details(subproject_id):
         'project_id': subproject.project_id,
         'start_date': subproject.start_date.strftime('%Y-%m-%d'),
         'deadline': subproject.deadline.strftime('%Y-%m-%d'),
-        'progress': subproject.progress,
+        'progress': f"{subproject.progress:.2f}" if subproject.progress else None,
         'status': subproject.status,
         'stages': [{
             'id': s.id,
@@ -259,7 +259,7 @@ def get_subproject_details(subproject_id):
             'description': s.description,
             'start_date': s.start_date.strftime('%Y-%m-%d'),
             'end_date': s.end_date.strftime('%Y-%m-%d'),
-            'progress': s.progress,
+            'progress': f"{s.progress:.2f}" if s.progress else None,
             'status': s.status,
             'tasks': [{
                 'id': t.id,
@@ -267,7 +267,7 @@ def get_subproject_details(subproject_id):
                 'description': t.description,
                 'due_date': t.due_date.strftime('%Y-%m-%d'),
                 'status': t.status,
-                'progress': t.progress
+                'progress': f"{t.progress:.2f}" if t.progress else None,
             } for t in s.tasks]
         } for s in subproject.stages]
     })
@@ -365,14 +365,14 @@ def get_project_timeline(project_id):
         'name': sp.name,
         'start_date': sp.start_date.strftime('%Y-%m-%d'),
         'deadline': sp.deadline.strftime('%Y-%m-%d'),
-        'progress': sp.progress,
+        'progress': f"{sp.progress:.2f}" if sp.progress else None,
         'status': sp.status,
         'stages': [{
             'id': s.id,
             'name': s.name,
             'start_date': s.start_date.strftime('%Y-%m-%d'),
             'end_date': s.end_date.strftime('%Y-%m-%d'),
-            'progress': s.progress,
+            'progress': f"{s.progress:.2f}" if s.progress else None,
             'status': s.status
         } for s in sp.stages]
     } for sp in project.subprojects]
@@ -383,7 +383,7 @@ def get_project_timeline(project_id):
             'name': project.name,
             'start_date': project.start_date.strftime('%Y-%m-%d'),
             'deadline': project.deadline.strftime('%Y-%m-%d'),
-            'progress': project.progress,
+            'progress': f"{project.progress:.2f}" if project.progress else None,
             'status': project.status
         },
         'subprojects': subprojects_timelines

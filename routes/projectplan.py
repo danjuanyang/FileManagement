@@ -43,7 +43,7 @@ def get_project_subprojects(current_user, project_id):
         'description': subproject.description,
         'startDate': subproject.start_date.isoformat(),
         'deadline': subproject.deadline.isoformat(),
-        'progress': subproject.progress,
+        'progress': f"{subproject.progress:.2f}" if subproject.progress else None ,
         'status': subproject.status,
         'employee_id': subproject.employee_id,
         'stagesCount': len(subproject.stages) if hasattr(subproject, 'stages') else 0
@@ -175,7 +175,7 @@ def get_subproject_stages(current_user, subproject_id):
             'description': task.description,
             'dueDate': task.due_date.isoformat(),
             'status': task.status,
-            'progress': task.progress,
+            'progress': f"{task.progress:.2f}" if task.progress is not None else None,
             'files': [{
                 'id': f.id is not None,
                 'has_content': f.content is not None if hasattr(f, 'content') else False
@@ -215,7 +215,7 @@ def get_project_stages(current_user, project_id):
         'description': stage.description,
         'startDate': stage.start_date.isoformat(),
         'endDate': stage.end_date.isoformat(),
-        'progress': stage.progress,
+        'progress': f"{stage.progress:.2f}" if stage.progress is not None else None,
         'status': stage.status,
         'tasks': [{
             'id': task.id,
@@ -232,69 +232,6 @@ def get_project_stages(current_user, project_id):
         } for task in stage.tasks]
     } for stage in stages])
 
-
-# 加权限的创建阶段
-# @projectplan_bp.route('/stages', methods=['POST'])
-# @track_activity
-# @token_required
-# def create_project_stage(current_user):
-#     data = request.get_json()
-#     tracking_id = data.pop('trackingId', None)
-#     subproject_id = data['subprojectId']
-#
-#     # 验证访问权限
-#     subproject = Subproject.query.get_or_404(subproject_id)
-#
-#     # 不同角色的权限检查
-#     if current_user.role > 2:  # 组员
-#         # 组员只能为分配给自己的子项目创建阶段
-#         if subproject.employee_id != current_user.id:
-#             return jsonify({'error': '您没有权限为此子项目创建阶段'}), 403
-#     elif current_user.role == 2:  # 组长
-#         # 组长只能为自己负责的项目下的子项目创建阶段
-#         project = Project.query.get(subproject.project_id)
-#         if project.employee_id != current_user.id:
-#             return jsonify({'error': '您没有权限为此项目的子项目创建阶段'}), 403
-#
-#     # 从子项目中获取project_id（如果未提供）
-#     project_id = data.get('projectId')
-#
-#     if not project_id:
-#         if subproject:
-#             project_id = subproject.project_id
-#         else:
-#             return jsonify({'error': '找不到子项目或项目ID不存在'}), 404
-#
-#     try:
-#         stage = ProjectStage(
-#             name=data['name'],
-#             description=data['description'],
-#             start_date=datetime.strptime(data['startDate'], '%Y-%m-%d'),
-#             end_date=datetime.strptime(data['endDate'], '%Y-%m-%d'),
-#             progress=data['progress'],
-#             status=data['status'],
-#             project_id=project_id,
-#             subproject_id=subproject_id
-#         )
-#
-#         db.session.add(stage)
-#
-#         if tracking_id:
-#             tracking = EditTimeTracking.query.get(tracking_id)
-#             if tracking:
-#                 tracking.end_time = datetime.now()
-#                 tracking.duration = int((tracking.end_time - tracking.start_time).total_seconds())
-#                 tracking.stage_id = stage.id
-#
-#         db.session.commit()
-#
-#         # 更新子项目进度
-#         update_subproject_progress(subproject_id)
-#
-#         return jsonify({'message': '阶段创建成功', 'id': stage.id}), 201
-#     except Exception as e:
-#         db.session.rollback()
-#         return jsonify({'error': str(e)}), 500
 
 # 修改创建阶段端点
 @projectplan_bp.route('/stages', methods=['POST'])
@@ -920,35 +857,6 @@ def update_stage(id):
 
 
 # 新功能，可根据阶段更新子项目进度
-# def update_subproject_progress(subproject_id):
-#     subproject = Subproject.query.get(subproject_id)
-#     if not subproject or not subproject.stages:
-#         return
-#
-#     total_progress = sum(stage.progress for stage in subproject.stages)
-#     subproject.progress = total_progress / len(subproject.stages)
-#
-#     if all(stage.status == 'completed' for stage in subproject.stages):
-#         subproject.status = 'completed'
-#     elif any(stage.status == 'in_progress' for stage in subproject.stages):
-#         subproject.status = 'in_progress'
-#
-#     # 更新父项目状态
-#     project = Project.query.get(subproject.project_id)
-#     if project and project.subprojects:
-#         # 计算项目总进度
-#         total_progress = sum(sp.progress for sp in project.subprojects)
-#         project.progress = total_progress / len(project.subprojects)
-#
-#         # 更新项目状态
-#         if all(sp.status == 'completed' for sp in project.subprojects):
-#             project.status = 'completed'
-#         elif any(sp.status == 'in_progress' for sp in project.subprojects) or any(
-#                 sp.progress < 100 for sp in project.subprojects):
-#             project.status = 'in_progress'
-#
-#     db.session.commit()
-
 # 修改 update_subproject_progress 函数，不自动将状态设置为 completed
 def update_subproject_progress(subproject_id):
     subproject = Subproject.query.get(subproject_id)

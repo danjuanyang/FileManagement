@@ -444,8 +444,6 @@ def get_project_list(current_user):
         return jsonify({'error': str(e)}), 500
 
 
-
-
 # 用户管理
 @leader_bp.route('/users', methods=['GET'])
 @token_required

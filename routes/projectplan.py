@@ -43,7 +43,8 @@ def get_project_subprojects(current_user, project_id):
         'description': subproject.description,
         'startDate': subproject.start_date.isoformat(),
         'deadline': subproject.deadline.isoformat(),
-        'progress': f"{subproject.progress:.2f}" if subproject.progress else None ,
+        # 'progress': f"{subproject.progress:.2f}" if subproject.progress is not None else None,
+        'progress': round(subproject.progress, 2) if subproject.progress is not None else None,
         'status': subproject.status,
         'employee_id': subproject.employee_id,
         'stagesCount': len(subproject.stages) if hasattr(subproject, 'stages') else 0
@@ -167,7 +168,8 @@ def get_subproject_stages(current_user, subproject_id):
         'description': stage.description,
         'startDate': stage.start_date.isoformat(),
         'endDate': stage.end_date.isoformat(),
-        'progress': stage.progress,
+        # 'progress': f"{stage.progress:.2f}" if stage.progress is not None else None,
+        'progress': round(stage.progress, 2) if stage.progress is not None else None,
         'status': stage.status,
         'tasks': [{
             'id': task.id,
@@ -175,7 +177,7 @@ def get_subproject_stages(current_user, subproject_id):
             'description': task.description,
             'dueDate': task.due_date.isoformat(),
             'status': task.status,
-            'progress': f"{task.progress:.2f}" if task.progress is not None else None,
+            'progress': task.progress,
             'files': [{
                 'id': f.id is not None,
                 'has_content': f.content is not None if hasattr(f, 'content') else False
@@ -215,7 +217,8 @@ def get_project_stages(current_user, project_id):
         'description': stage.description,
         'startDate': stage.start_date.isoformat(),
         'endDate': stage.end_date.isoformat(),
-        'progress': f"{stage.progress:.2f}" if stage.progress is not None else None,
+        # 'progress': f"{stage.progress:.2f}" if stage.progress is not None else None,
+        'progress': round(stage.progress, 2) if stage.progress is not None else None,
         'status': stage.status,
         'tasks': [{
             'id': task.id,
@@ -233,7 +236,7 @@ def get_project_stages(current_user, project_id):
     } for stage in stages])
 
 
-# 修改创建阶段端点
+# 加权限的创建阶段
 @projectplan_bp.route('/stages', methods=['POST'])
 @track_activity
 @token_required
@@ -856,7 +859,6 @@ def update_stage(id):
     return jsonify({'message': '阶段更新成功'}), 200
 
 
-# 新功能，可根据阶段更新子项目进度
 # 修改 update_subproject_progress 函数，不自动将状态设置为 completed
 def update_subproject_progress(subproject_id):
     subproject = Subproject.query.get(subproject_id)
@@ -886,6 +888,8 @@ def update_subproject_progress(subproject_id):
             project.status = 'in_progress'
 
     db.session.commit()
+
+
 # -------------------------------权限--------------------------------------
 
 # 组长分配

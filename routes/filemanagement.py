@@ -463,7 +463,7 @@ def search_files():
         if subproject_id:
             base_query = base_query.filter(ProjectFile.subproject_id == subproject_id)
 
-        if current_user.role != 1:  # 非管理员
+        if current_user.role not in [0, 1]:  # 非管理员
             if visibility == 'public':
                 base_query = base_query.filter(ProjectFile.is_public == True)
             elif visibility == 'private':
@@ -529,7 +529,7 @@ def search_files():
                     'is_public': file.is_public
                 }
 
-                #添加内容预览
+                # 添加内容预览
                 if file.content:
                     preview = get_content_preview(
                         file.content.content,
@@ -553,8 +553,6 @@ def search_files():
     except Exception as e:
         print(f"搜索错误: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
-
 
 
 # 获取内容预览
@@ -651,7 +649,7 @@ def delete_file(file_id):
         if not user:
             return jsonify({'error': '用户未找到'}), 404
 
-        if file.upload_user_id != current_user_id and user.role != 1:  # 1表示管理员角色
+        if file.upload_user_id != current_user_id and user.role not in [0, 1]:  # 1表示管理员角色
             return jsonify({'error': '没有权限删除此文件'}), 403
 
         # 获取物理文件路径
@@ -814,7 +812,7 @@ def export_file_list():
         )
 
         # 根据用户角色筛选数据
-        if current_user.role != 1:  # 如果不是管理员，只能看到自己的文件
+        if current_user.role not in [0, 1]:  # 如果不是管理员，只能看到自己的文件
             base_query = base_query.filter(ProjectFile.upload_user_id == current_user_id)
 
         # 执行查询，并按项目、子项目、阶段、任务、上传时间排序
@@ -830,7 +828,7 @@ def export_file_list():
         stats_query = db.session.query(
             func.count(ProjectFile.id).label('total_files')
         )
-        if current_user.role != 1:
+        if current_user.role not in [0, 1]:  # 如果不是管理员，只能看到自己的文件
             stats_query = stats_query.filter(ProjectFile.upload_user_id == current_user_id)
         stats = stats_query.first()
 
@@ -1003,7 +1001,9 @@ def update_file_visibility(file_id):
         file = ProjectFile.query.get_or_404(file_id)
 
         # 验证权限(只有文件上传者或管理员可以修改)
-        if file.upload_user_id != current_user_id and current_user.role != 1:
+        # if file.upload_user_id != current_user_id and current_user.role != 1:
+        # 不为0或者1
+        if file.upload_user_id != current_user_id and current_user.role not in [0, 1]:
             return jsonify({'error': '没有权限修改此文件'}), 403
 
         # 获取请求数据

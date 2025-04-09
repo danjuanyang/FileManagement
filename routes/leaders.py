@@ -43,8 +43,8 @@ def get_projects():
             'employee': p.employee.username if p.employee else None,
             'start_date': format_date(p.start_date),
             'deadline': format_date(p.deadline),
-            # 'progress': p.progress,
-            'progress': f"{p.progress:.2f}" if p.progress is not None else None,
+            # 'progress': f"{p.progress:.2f}" if p.progress else '0',
+            'progress': round(p.progress, 2) if p.progress is not None else None,
             'status': p.status
         } for p in projects.items],
         'total': projects.total,
@@ -190,7 +190,7 @@ def get_project_details(project_id):
             'employee': project.employee.username if project.employee else None,
             'start_date': project.start_date.strftime('%Y-%m-%d') if project.start_date else None,
             'deadline': project.deadline.strftime('%Y-%m-%d') if project.deadline else None,
-            'progress': f"{project.progress:.2f}" if project.progress is not None else None,
+            'progress': project.progress,
             'status': project.status,
             'stages': []
         }
@@ -221,7 +221,7 @@ def get_project_details(project_id):
                     'employee': project.employee.username if project.employee else None,
                     'due_date': task.due_date.strftime('%Y-%m-%d') if task.due_date else None,
                     'status': task.status,
-                    'progress': f"{task.progress:.2f}" if task.progress is not None else None,
+                    'progress': task.progress,
                     'created_at': task.created_at.strftime('%Y-%m-%d %H:%M:%S') if task.created_at else None,
                     'updated_at': task.updated_at.strftime('%Y-%m-%d %H:%M:%S') if task.updated_at else None,
                     'tracking_edit_time': task_edit_time
@@ -302,6 +302,9 @@ def get_report_clockin_data(current_user):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+# 2025年3月28日15:28:03
+# 项目列表，新版本，包含子项目，任务更新负责人
 @leader_bp.route('/projectlist', methods=['GET'])
 @track_activity
 @token_required
@@ -339,7 +342,7 @@ def get_project_list(current_user):
                             TaskProgressUpdate.created_at.desc()).all()
                         update_list = [{
                             'id': update.id,
-                            'progress': f"{update.progress:.2f}" if update.progress is not None else None,
+                            'progress': update.progress,
                             'description': update.description,
                             'created_at': update.created_at.strftime('%Y-%m-%d %H:%M:%S'),
                             'recorder_id': update.recorder_id,
@@ -352,7 +355,7 @@ def get_project_list(current_user):
                             'description': task.description,
                             'due_date': task.due_date.strftime('%Y-%m-%d') if task.due_date else None,
                             'status': task.status,
-                            'progress': f"{task.progress:.2f}" if task.progress is not None else None,
+                            'progress': task.progress,
                             'progress_updates': update_list
                         })
 
@@ -362,7 +365,8 @@ def get_project_list(current_user):
                         'description': stage.description,
                         'start_date': stage.start_date.strftime('%Y-%m-%d') if stage.start_date else None,
                         'end_date': stage.end_date.strftime('%Y-%m-%d') if stage.end_date else None,
-                        'progress': f"{stage.progress:.2f}" if stage.progress is not None else None,
+                        # 'progress': f"{stage.progress:.2f}" if stage.progress else None,
+                        'progress': round(stage.progress, 2) if stage.progress else None,
                         'status': stage.status,
                         'tasks': task_list
                     })
@@ -375,7 +379,8 @@ def get_project_list(current_user):
                     'employee_name': employee.username if employee else None,
                     'start_date': subproject.start_date.strftime('%Y-%m-%d') if subproject.start_date else None,
                     'deadline': subproject.deadline.strftime('%Y-%m-%d') if subproject.deadline else None,
-                    'progress': f"{subproject.progress:.2f}" if subproject.progress is not None else None,
+                    # 'progress': f"{subproject.progress:.2f}" if subproject.progress else None,
+                    'progress': round(subproject.progress, 2) if subproject.progress else None,
                     'status': subproject.status,
                     'stages': stage_list
                 })
@@ -392,7 +397,7 @@ def get_project_list(current_user):
                     'description': task.description,
                     'due_date': task.due_date.strftime('%Y-%m-%d') if task.due_date else None,
                     'status': task.status,
-                    'progress': f"{task.progress:.2f}" if task.progress is not None else None
+                    'progress': task.progress
                 } for task in tasks]
 
                 stage_list.append({
@@ -401,7 +406,8 @@ def get_project_list(current_user):
                     'description': stage.description,
                     'start_date': stage.start_date.strftime('%Y-%m-%d') if stage.start_date else None,
                     'end_date': stage.end_date.strftime('%Y-%m-%d') if stage.end_date else None,
-                    'progress': f"{stage.progress:.2f}" if stage.progress is not None else None,
+                    # 'progress': f"{stage.progress:.2f}" if stage.progress else None,
+                    'progress': round(stage.progress, 2) if stage.progress else None,
                     'status': stage.status,
                     'tasks': task_list
                 })
@@ -424,7 +430,8 @@ def get_project_list(current_user):
                 'employee': project.employee.username if project.employee else None,
                 'start_date': project.start_date.strftime('%Y-%m-%d') if project.start_date else None,
                 'deadline': project.deadline.strftime('%Y-%m-%d') if project.deadline else None,
-                'progress': f"{project.progress:.2f}" if project.progress is not None else None,
+                # 'progress': f"{project.progress:.2f}" if project.progress else None,
+                'progress': round(project.progress, 2) if project.progress else None,
                 'status': project.status,
                 'subprojects': subproject_list,
                 'stages': stage_list,
@@ -435,6 +442,7 @@ def get_project_list(current_user):
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
 
 
 
@@ -491,7 +499,7 @@ def get_users(current_user):
             project_list = [{
                 'id': project.id,
                 'name': project.name,
-                'progress': f"{project.progress:.2f}" if project.progress is not None else None,
+                'progress': project.progress,
                 'status': project.status,
                 'deadline': project.deadline.isoformat() if project.deadline else None
             } for project in projects]
@@ -815,7 +823,7 @@ def get_my_projects(current_user):
             'description': p.description,
             'start_date': p.start_date.strftime('%Y-%m-%d') if p.start_date else None,
             'deadline': p.deadline.strftime('%Y-%m-%d') if p.deadline else None,
-            'progress': f"{p.progress:.2f}" if p.progress else None,
+            'progress': p.progress,
             'status': p.status,
             'subprojects': [{
                 'id': sp.id,
@@ -823,7 +831,7 @@ def get_my_projects(current_user):
                 'description': sp.description,
                 'employee_id': sp.employee_id,
                 'employee_name': User.query.get(sp.employee_id).username if sp.employee_id else None,
-                'progress': f"{sp.progress:.2f}" if sp.progress else None,
+                'progress': sp.progress,
                 'status': sp.status,
             } for sp in p.subprojects]
         } for p in projects]

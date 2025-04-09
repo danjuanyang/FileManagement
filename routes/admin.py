@@ -1,6 +1,8 @@
 # routes/admin.py
-from flask import Blueprint, request, jsonify
-from models import User, UserSession, UserActivityLog, Project
+import os
+
+from flask import Blueprint, request, jsonify, current_app
+from models import User, UserSession, UserActivityLog, Project, ProjectFile
 from utils.activity_tracking import track_activity, log_user_activity
 import jwt
 import datetime
@@ -248,6 +250,7 @@ def get_dashboard_stats():
     except Exception as e:
         return jsonify({'message': str(e)}), 500
 
+
 @admin_bp.route('/logout', methods=['POST'])
 @track_activity
 def logout():
@@ -394,7 +397,6 @@ def clear_expired_sessions():
         return jsonify({'message': str(e)}), 500
 
 
-
 #  获取当前用户的活动摘要
 @admin_bp.route('/activity-summary', methods=['GET'])
 @track_activity
@@ -436,6 +438,363 @@ def get_user_activity_summary():
             'today_activities': today_activities,
             'activity_breakdown': dict(activity_stats)
         }), 200
+
+    except Exception as e:
+        return jsonify({'message': str(e)}), 500
+
+
+# 管理员文件删除接口 - 可以删除任何文件及关联数据
+@admin_bp.route('/files/<int:file_id>', methods=['DELETE'])
+@track_activity
+def admin_delete_file(file_id):
+    try:
+        # 验证管理员权限
+        admin_data = check_admin_auth()
+        admin_id = admin_data.get('user_id')
+
+        # 获取文件记录
+        file = ProjectFile.query.get_or_404(file_id)
+
+        # 记录被删除的文件信息，用于日志
+        file_info = {
+            'id': file.id,
+            'name': file.original_name,
+            'project': file.project.name if file.project else "Unknown",
+            'subproject': file.subproject.name if file.subproject else "Unknown",
+            'stage': file.stage.name if file.stage else "Unknown",
+            'task': file.task.name if file.task else "Unknown",
+            'uploader': file.upload_user.username if file.upload_user else "Unknown",
+        }
+
+        # 获取物理文件路径
+        file_path = os.path.join(app.root_path, file.file_path)
+
+        # 先删除文件内容记录（如果存在）
+        if file.content:
+            db.session.delete(file.content)
+
+        # 删除文件数据库记录
+        db.session.delete(file)
+        db.session.commit()
+
+        # 删除物理文件
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+
+                # 尝试删除空文件夹
+                directory = os.path.dirname(file_path)
+                if os.path.exists(directory) and not os.listdir(directory):
+                    os.rmdir(directory)
+            except OSError as e:
+                # 记录错误但继续执行，因为数据库记录已删除
+                print(f"删除物理文件时出错： {e}")
+                # 记录日志
+                log_user_activity(
+                    user_id=admin_id,
+                    action_type='admin_delete_file_error',
+                    action_detail=f"管理员删除文件 {file_info['name']} (ID: {file_id}) 的物理文件时出错: {str(e)}",
+                    resource_type='file',
+                    resource_id=file_id
+                )
+
+        # 记录操作日志
+        log_user_activity(
+            user_id=admin_id,
+            action_type='admin_delete_file',
+            action_detail=f"管理员删除了文件 {file_info['name']} (ID: {file_id})，项目: {file_info['project']}，" \
+                          f"子项目: {file_info['subproject']}，阶段: {file_info['stage']}，" \
+                          f"任务: {file_info['task']}，上传者: {file_info['uploader']}",
+            resource_type='file',
+            resource_id=file_id
+        )
+
+        return jsonify({
+            'message': '文件删除成功',
+            'file_id': file_id,
+            'file_info': file_info
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"管理员删除文件错误: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+# 批量删除文件接口
+@admin_bp.route('/files/batch-delete', methods=['POST'])
+@track_activity
+def admin_batch_delete_files():
+    try:
+        # 验证管理员权限
+        admin_data = check_admin_auth()
+        admin_id = admin_data.get('user_id')
+
+        # 获取请求中的文件ID列表
+        data = request.get_json()
+        file_ids = data.get('file_ids', [])
+
+        if not file_ids:
+            return jsonify({'error': '未提供文件ID列表'}), 400
+
+        deleted_files = []
+        error_files = []
+
+        for file_id in file_ids:
+            try:
+                # 获取文件记录
+                file = ProjectFile.query.get(file_id)
+                if not file:
+                    error_files.append({'id': file_id, 'error': '文件不存在'})
+                    continue
+
+                # 记录被删除的文件信息
+                file_info = {
+                    'id': file.id,
+                    'name': file.original_name,
+                    'project': file.project.name if file.project else "Unknown",
+                    'subproject': file.subproject.name if file.subproject else "Unknown",
+                    'stage': file.stage.name if file.stage else "Unknown",
+                    'task': file.task.name if file.task else "Unknown"
+                }
+
+                # 获取物理文件路径
+                file_path = os.path.join(app.root_path, file.file_path)
+
+                # 先删除文件内容记录（如果存在）
+                if file.content:
+                    db.session.delete(file.content)
+
+                # 删除文件数据库记录
+                db.session.delete(file)
+
+                # 删除物理文件
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except OSError:
+                        # 记录错误但继续执行
+                        pass
+
+                deleted_files.append(file_info)
+
+            except Exception as e:
+                error_files.append({'id': file_id, 'error': str(e)})
+                # 回滚当前文件的删除操作
+                db.session.rollback()
+
+        # 提交所有成功的删除
+        if deleted_files:
+            db.session.commit()
+
+            # 记录操作日志
+            log_user_activity(
+                user_id=admin_id,
+                action_type='admin_batch_delete_files',
+                action_detail=f"管理员批量删除了 {len(deleted_files)} 个文件",
+                resource_type='file'
+            )
+
+        return jsonify({
+            'message': f'批量删除完成: {len(deleted_files)} 个文件删除成功, {len(error_files)} 个文件删除失败',
+            'deleted_files': deleted_files,
+            'error_files': error_files
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"管理员批量删除文件错误: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+# 根据筛选条件批量删除文件
+@admin_bp.route('/files/delete-by-filter', methods=['POST'])
+@track_activity
+def admin_delete_files_by_filter():
+    try:
+        # 验证管理员权限
+        admin_data = check_admin_auth()
+        admin_id = admin_data.get('user_id')
+
+        # 获取请求中的筛选条件
+        data = request.get_json()
+        project_id = data.get('project_id')
+        subproject_id = data.get('subproject_id')
+        stage_id = data.get('stage_id')
+        task_id = data.get('task_id')
+        upload_user_id = data.get('upload_user_id')
+        date_before = data.get('date_before')  # 格式: "YYYY-MM-DD"
+        date_after = data.get('date_after')  # 格式: "YYYY-MM-DD"
+        file_type = data.get('file_type')  # 文件类型
+
+        # 构建查询
+        query = ProjectFile.query
+
+        if project_id:
+            query = query.filter(ProjectFile.project_id == project_id)
+        if subproject_id:
+            query = query.filter(ProjectFile.subproject_id == subproject_id)
+        if stage_id:
+            query = query.filter(ProjectFile.stage_id == stage_id)
+        if task_id:
+            query = query.filter(ProjectFile.task_id == task_id)
+        if upload_user_id:
+            query = query.filter(ProjectFile.upload_user_id == upload_user_id)
+        if date_before:
+            query = query.filter(ProjectFile.upload_date <= datetime.strptime(date_before, "%Y-%m-%d"))
+        if date_after:
+            query = query.filter(ProjectFile.upload_date >= datetime.strptime(date_after, "%Y-%m-%d"))
+        if file_type:
+            query = query.filter(ProjectFile.file_type.like(f"%{file_type}%"))
+
+        # 获取符合条件的文件数量
+        matching_count = query.count()
+
+        # 安全检查：如果匹配的文件太多，需要确认
+        if matching_count > 100 and not data.get('confirmed'):
+            return jsonify({
+                'status': 'confirm_required',
+                'message': f'该操作将删除 {matching_count} 个文件，请确认',
+                'matching_count': matching_count
+            }), 200
+
+        # 获取所有匹配的文件
+        matching_files = query.all()
+
+        deleted_count = 0
+        error_count = 0
+
+        # 删除所有匹配的文件
+        for file in matching_files:
+            try:
+                # 获取物理文件路径
+                file_path = os.path.join(app.root_path, file.file_path)
+
+                # 先删除文件内容记录（如果存在）
+                if file.content:
+                    db.session.delete(file.content)
+
+                # 删除文件数据库记录
+                db.session.delete(file)
+
+                # 删除物理文件
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except OSError:
+                        # 记录错误但继续执行
+                        pass
+
+                deleted_count += 1
+
+            except Exception as e:
+                error_count += 1
+                print(f"删除文件 {file.id} 时出错: {str(e)}")
+                # 单个文件删除失败不影响其他文件
+                db.session.rollback()
+
+        # 提交所有成功的删除
+        if deleted_count > 0:
+            db.session.commit()
+
+            # 记录操作日志
+            filter_description = ', '.join(f"{k}:{v}" for k, v in data.items() if k != 'confirmed' and v)
+            log_user_activity(
+                user_id=admin_id,
+                action_type='admin_delete_files_by_filter',
+                action_detail=f"管理员通过筛选条件({filter_description})批量删除了 {deleted_count} 个文件",
+                resource_type='file'
+            )
+
+        return jsonify({
+            'message': f'批量删除完成: {deleted_count} 个文件删除成功, {error_count} 个文件删除失败',
+            'deleted_count': deleted_count,
+            'error_count': error_count,
+            'total_matched': matching_count
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"管理员按条件删除文件错误: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/files', methods=['GET'])
+@track_activity
+def get_admin_files():
+    try:
+        # 验证管理员授权
+        check_admin_auth()
+
+        # 获取分页参数
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+
+        # 获取筛选器参数
+        project_id = request.args.get('project_id', type=int)
+        upload_user_id = request.args.get('upload_user_id', type=int)
+        visibility = request.args.get('visibility')
+
+        # 构建查询
+        query = ProjectFile.query.options(
+            db.joinedload(ProjectFile.project),
+            db.joinedload(ProjectFile.subproject),
+            db.joinedload(ProjectFile.stage),
+            db.joinedload(ProjectFile.task),
+            db.joinedload(ProjectFile.upload_user)
+        )
+
+        # 应用筛选器
+        if project_id:
+            query = query.filter(ProjectFile.project_id == project_id)
+        if upload_user_id:
+            query = query.filter(ProjectFile.upload_user_id == upload_user_id)
+        if visibility == 'public':
+            query = query.filter(ProjectFile.is_public == True)
+        elif visibility == 'private':
+            query = query.filter(ProjectFile.is_public == False)
+
+        # 执行分页查询
+        paginated_files = query.order_by(ProjectFile.id.desc()).paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+
+        # 准备响应数据
+        files_data = []
+        for file in paginated_files.items:
+            try:
+                file_path = os.path.join(current_app.root_path, file.file_path)
+                file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+
+                files_data.append({
+                    'id': file.id,
+                    'fileName': file.file_name,
+                    'originalName': file.original_name,
+                    'fileSize': file_size,
+                    'fileType': file.file_type,
+                    'uploadTime': file.upload_date.isoformat(),
+                    'uploader': file.upload_user.username if file.upload_user else "Unknown",
+                    'upload_user_id': file.upload_user_id,
+                    'projectName': file.project.name if file.project else None,
+                    'project_id': file.project_id,
+                    'subprojectName': file.subproject.name if file.subproject else None,
+                    'subproject_id': file.subproject_id,
+                    'stageName': file.stage.name if file.stage else None,
+                    'stage_id': file.stage_id,
+                    'taskName': file.task.name if file.task else None,
+                    'task_id': file.task_id,
+                    'is_public': file.is_public
+                })
+            except Exception as e:
+                print(f"Error processing file {file.id}: {str(e)}")
+                continue
+
+        return jsonify({
+            'files': files_data,
+            'total': paginated_files.total,
+            'pages': paginated_files.pages,
+            'current_page': page
+        })
 
     except Exception as e:
         return jsonify({'message': str(e)}), 500

@@ -8,7 +8,8 @@ from sqlalchemy import desc
 from user_agents import parse
 
 from models import db, Project, ProjectFile, User, StageTask, ProjectStage, EditTimeTracking, ReportClockinDetail, \
-    ReportClockin, UserSession, TaskProgressUpdate, Subproject
+    ReportClockin, UserSession, TaskProgressUpdate, Subproject, AnnouncementReadStatus, UserActivityLog, Comment, Reply, \
+    AIConversation, AIApi
 from datetime import datetime
 
 from routes.employees import token_required
@@ -632,6 +633,50 @@ def update_user(current_user, user_id):
 
 
 # 删除用户
+# @leader_bp.route('/users/<int:user_id>', methods=['DELETE'])
+# @token_required
+# def delete_user(current_user, user_id):
+#     if current_user.role not in [0, 1]:
+#         return jsonify({'error': '权限不足'}), 403
+#
+#     try:
+#         user = User.query.get_or_404(user_id)
+#
+#         # 检查是否删除自己
+#         if user.id == current_user.id:
+#             return jsonify({'error': '不能删除当前登录用户'}), 400
+#
+#         # 开始事务
+#         with db.session.begin_nested():
+#             # 先处理可能的关联数据
+#             # 获取用户关联的项目
+#             projects = Project.query.filter_by(employee_id=user.id).all()
+#             if projects:
+#                 for project in projects:
+#                     # 检查项目状态
+#                     if project.status == 'ongoing':
+#                         return jsonify({'error': f'用户有正在进行中的项目: {project.name}, 无法删除'}), 400
+#                     project.employee_id = None
+#
+#             # 将上传文件的用户ID置为空
+#             ProjectFile.query.filter_by(upload_user_id=user.id).update({'upload_user_id': None})
+#
+#             # 删除用户相关的编辑时间记录和补卡记录会通过 CASCADE 自动处理
+#
+#             # 删除用户
+#             db.session.delete(user)
+#
+#         # 提交事务
+#         db.session.commit()
+#         return jsonify({'message': '用户删除成功'})
+#
+#     except Exception as e:
+#         db.session.rollback()
+#         print(f"删除用户错误: {str(e)}")  # 添加日志输出
+#         return jsonify({'error': f'删除用户失败: {str(e)}'}), 500
+
+
+# 删除用户
 @leader_bp.route('/users/<int:user_id>', methods=['DELETE'])
 @token_required
 def delete_user(current_user, user_id):
@@ -647,32 +692,89 @@ def delete_user(current_user, user_id):
 
         # 开始事务
         with db.session.begin_nested():
-            # 先处理可能的关联数据
-            # 获取用户关联的项目
+            # 1. 处理用户关联的项目
             projects = Project.query.filter_by(employee_id=user.id).all()
-            if projects:
-                for project in projects:
-                    # 检查项目状态
-                    if project.status == 'ongoing':
-                        return jsonify({'error': f'用户有正在进行中的项目: {project.name}, 无法删除'}), 400
-                    project.employee_id = None
+            for project in projects:
+                # 检查项目状态
+                if project.status == 'ongoing':
+                    return jsonify({'error': f'用户有正在进行中的项目: {project.name}, 无法删除'}), 400
+                # 将项目负责人设为空
+                project.employee_id = None
 
-            # 将上传文件的用户ID置为空
+            # 2. 处理用户关联的子项目
+            subprojects = Subproject.query.filter_by(employee_id=user.id).all()
+            for subproject in subprojects:
+                # 检查子项目状态
+                if subproject.status == 'ongoing':
+                    return jsonify({'error': f'用户有正在进行中的子项目: {subproject.name}, 无法删除'}), 400
+                # 将子项目负责人设为空
+                subproject.employee_id = None
+
+            # 3. 处理用户的团队成员关系
+            if user.role == 2:  # 如果是组长
+                # 获取该组长的所有组员
+                team_members = User.query.filter_by(team_leader_id=user.id).all()
+                # 解除所有组员的组长关联
+                for member in team_members:
+                    member.team_leader_id = None
+            elif user.role == 3:  # 如果是组员
+                # 清除组长关联
+                user.team_leader_id = None
+
+            # 4. 处理上传文件的用户ID
             ProjectFile.query.filter_by(upload_user_id=user.id).update({'upload_user_id': None})
 
-            # 删除用户相关的编辑时间记录和补卡记录会通过 CASCADE 自动处理
+            # 5. 处理任务进度更新记录
+            TaskProgressUpdate.query.filter_by(recorder_id=user.id).update({'recorder_id': None})
 
-            # 删除用户
+            # 6. 处理用户会话
+            UserSession.query.filter_by(user_id=user.id).delete()
+
+            # 7. 处理用户活动日志
+            UserActivityLog.query.filter_by(user_id=user.id).delete()
+
+            # 8. 处理用户的补卡记录
+            ReportClockin.query.filter_by(employee_id=user.id).delete()
+
+            # 9. 处理训练评论和回复
+            Comment.query.filter_by(user_id=user.id).delete()
+            Reply.query.filter_by(user_id=user.id).delete()
+
+            # 10. 处理AI相关数据
+            AIConversation.query.filter_by(user_id=user.id).delete()
+            AIApi.query.filter_by(user_id=user.id).delete()
+
+            # 11. 处理公告阅读状态
+            AnnouncementReadStatus.query.filter_by(user_id=user.id).delete()
+
+            # 12. 处理编辑时间跟踪
+            EditTimeTracking.query.filter_by(user_id=user.id).delete()
+
+            # 最后删除用户
             db.session.delete(user)
 
         # 提交事务
         db.session.commit()
-        return jsonify({'message': '用户删除成功'})
+
+        # 记录删除用户操作
+        log_user_activity(
+            user_id=current_user.id,
+            action_type='delete_user',
+            action_detail=f'管理员删除了用户 {user.username}',
+            resource_type='user',
+            resource_id=user_id
+        )
+
+        return jsonify({
+            'message': '用户删除成功',
+            'username': user.username
+        })
 
     except Exception as e:
         db.session.rollback()
         print(f"删除用户错误: {str(e)}")  # 添加日志输出
         return jsonify({'error': f'删除用户失败: {str(e)}'}), 500
+
 
 
 @leader_bp.route('/users/<int:user_id>/change-password', methods=['PUT'])

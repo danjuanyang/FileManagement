@@ -83,7 +83,7 @@ def register():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
-    role = data.get('role', 2)
+    role = data.get('role', 3) # 默认为普通用户
 
     if User.query.filter_by(username=username).first():
         return jsonify({'message': '用户名已存在'}), 400
@@ -134,7 +134,7 @@ def register():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
-    role = data.get('role', 2)
+    role = data.get('role', 3)  # 默认为普通用户
 
     if User.query.filter_by(username=username).first():
         return jsonify({'message': '用户名已存在'}), 400

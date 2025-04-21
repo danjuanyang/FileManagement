@@ -82,6 +82,69 @@ def create_title_page(text, output_path, font_size=16, subtitle=None):
         return False
 
 
+def create_evidence_title_page(subproject_name, output_path):
+    """创建'佐证资料'标题页"""
+    try:
+        if not setup_fonts():
+            raise Exception("字体设置失败")
+
+        c = canvas.Canvas(output_path, pagesize=A4)
+        width, height = A4
+
+        # 设置字体
+        c.setFont("SimSun", 20)
+
+        # 创建标题: "xxx佐证资料"
+        title_text = f"{subproject_name}佐证资料"
+        text_width = c.stringWidth(title_text, "SimSun", 20)
+        x = (width - text_width) / 2
+        y = height / 2
+
+        c.drawString(x, y, title_text)
+
+        c.showPage()
+        c.save()
+
+        return True
+    except Exception as e:
+        print(f"创建佐证资料标题页失败: {str(e)}")
+        return False
+
+
+def create_file_name_page(filename, output_path, font_size=14):
+    """创建带有文件名的空白页（去除文件后缀）"""
+    try:
+        if not setup_fonts():
+            raise Exception("字体设置失败")
+
+        # 去除文件后缀名
+        filename_without_ext = os.path.splitext(filename)[0]
+
+        c = canvas.Canvas(output_path, pagesize=A4)
+        width, height = A4
+
+        # 设置字体
+        c.setFont("SimSun", font_size)
+
+        # 在页面中央添加文本
+        text_width = c.stringWidth(filename_without_ext, "SimSun", font_size)
+        x = (width - text_width) / 2
+        y = height / 2
+
+        c.drawString(x, y, filename_without_ext)
+
+        c.showPage()
+        c.save()
+
+        return True
+    except Exception as e:
+        print(f"创建文件名页失败: {str(e)}")
+        return False
+
+
+# 移除不需要的函数
+
+
 def create_toc_page(toc_items, output_path):
     """创建目录页"""
     try:
@@ -189,54 +252,6 @@ def create_toc_page(toc_items, output_path):
         return False
 
 
-def create_task_content_page(subproject_name, stage_name, task_name, file_list, output_path):
-    """创建任务内容页，包含完整的路径（子项目-阶段-任务）和文件列表"""
-    try:
-        if not setup_fonts():
-            raise Exception("字体设置失败")
-
-        c = canvas.Canvas(output_path, pagesize=A4)
-        width, height = A4
-
-        # 设置字体
-        c.setFont("SimSun", 16)
-
-        # 绘制完整标题路径：子项目-阶段-任务
-        full_title = f"{subproject_name} - {stage_name} - {task_name}"
-        title_width = c.stringWidth(full_title, "SimSun", 16)
-        x = (width - title_width) / 2
-        y = height - 2 * cm
-        c.drawString(x, y, full_title)
-
-        # 绘制红色标题：合并PDF，任务下的所有PDF
-        c.setFillColorRGB(1, 0, 0)  # 设置红色
-        c.setFont("SimSun", 14)
-
-
-        # 重置为黑色
-        c.setFillColorRGB(0, 0, 0)
-        c.setFont("SimSun", 12)
-
-        # 绘制文件列表
-        y_pos = height - 6 * cm
-        for i, file_name in enumerate(file_list):
-            c.drawString(3 * cm, y_pos, file_name)
-            y_pos -= 0.8 * cm
-
-            # 每页最多显示25个文件，如果超过则创建新页
-            if (i + 1) % 25 == 0 and i < len(file_list) - 1:
-                c.showPage()
-                c.setFont("SimSun", 12)
-                y_pos = height - 2 * cm
-
-        c.showPage()
-        c.save()
-        return True
-    except Exception as e:
-        print(f"创建任务内容页失败: {str(e)}")
-        return False
-
-
 def extract_prefix_number(filename):
     """从文件名中提取前缀数字"""
     match = re.match(r'^(\d+)', filename)
@@ -280,20 +295,15 @@ def merge_project_files_to_pdf(project_id):
         if not subprojects:
             return None, "项目中没有子项目"
 
-        # 1. 创建项目标题页
-        project_title_page = os.path.join(temp_dir, "project_title.pdf")
-        if create_title_page(project.name, project_title_page, font_size=24):
-            final_pdf_merger.append(project_title_page)
-
         # 将项目添加到目录
         toc_counter['project'] += 1
         toc_items.append({
             'level': 1,
-            'text': f"{toc_counter['project']} 项目一",
+            'text': f"{toc_counter['project']}.{project.name} ",
             'name': project.name
         })
 
-        # 2. 处理每个子项目
+        # 处理每个子项目
         for subproject_index, subproject in enumerate(subprojects, 1):
             # 更新子项目计数
             toc_counter['subproject'] = subproject_index
@@ -302,14 +312,9 @@ def merge_project_files_to_pdf(project_id):
             # 添加子项目到目录
             toc_items.append({
                 'level': 2,
-                'text': f"{toc_counter['project']}.{toc_counter['subproject']} 子项目一",
+                'text': f"{toc_counter['project']}.{toc_counter['subproject']}.{subproject.name}",
                 'name': subproject.name
             })
-
-            # 创建子项目标题页
-            subproject_title_page = os.path.join(temp_dir, f"subproject_{subproject.id}_title.pdf")
-            if create_title_page(subproject.name, subproject_title_page, font_size=20):
-                final_pdf_merger.append(subproject_title_page)
 
             # 记录当前处理的子项目名称（调试用）
             print(f"处理子项目: {subproject.name}")
@@ -317,7 +322,7 @@ def merge_project_files_to_pdf(project_id):
             # 获取子项目下所有阶段
             stages = ProjectStage.query.filter_by(subproject_id=subproject.id).all()
 
-            # 3. 处理每个阶段
+            # 处理每个阶段
             for stage_index, stage in enumerate(stages, 1):
                 # 更新阶段计数
                 toc_counter['stage'] = stage_index
@@ -330,18 +335,13 @@ def merge_project_files_to_pdf(project_id):
                     'name': stage.name
                 })
 
-                # 创建阶段标题页
-                stage_title_page = os.path.join(temp_dir, f"stage_{stage.id}_title.pdf")
-                if create_title_page(stage.name, stage_title_page, font_size=18):
-                    final_pdf_merger.append(stage_title_page)
-
                 # 记录当前处理的阶段名称（调试用）
                 print(f"  处理阶段: {stage.name}")
 
                 # 获取阶段下所有任务
                 tasks = StageTask.query.filter_by(stage_id=stage.id).all()
 
-                # 4. 处理每个任务
+                # 处理每个任务
                 for task_index, task in enumerate(tasks, 1):
                     # 更新任务计数
                     toc_counter['task'] = task_index
@@ -377,18 +377,6 @@ def merge_project_files_to_pdf(project_id):
                         # 构建完整的标题路径
                         task_path_title = f"{subproject.name} - {stage.name} - {task.name}"
 
-                        # 创建任务标题页（初始页面）
-                        task_title_page = os.path.join(temp_dir, f"task_{task.id}_title.pdf")
-                        if create_title_page(task_path_title, task_title_page, font_size=16):
-                            final_pdf_merger.append(task_title_page)
-
-                        # 创建任务内容页，显示完整路径和文件列表
-                        task_content_page = os.path.join(temp_dir, f"task_{task.id}_content.pdf")
-                        if create_task_content_page(subproject.name, stage.name, task.name,
-                                                    [file.original_name for file in pdf_files],
-                                                    task_content_page):
-                            final_pdf_merger.append(task_content_page)
-
                         # 合并任务下的所有PDF文件
                         for file in pdf_files:
                             input_path = os.path.join(current_app.root_path, file.file_path)
@@ -401,11 +389,17 @@ def merge_project_files_to_pdf(project_id):
                                 continue
 
                             try:
-                                # 直接添加PDF文件到合并器
+                                # 先添加文件名页面
+                                file_name_page = os.path.join(temp_dir, f"file_{file.id}_name.pdf")
+                                if create_file_name_page(file.original_name, file_name_page):
+                                    final_pdf_merger.append(file_name_page)
+
+                                # 再添加PDF文件到合并器
                                 final_pdf_merger.append(input_path)
+
                                 processed_files.append(file.original_name)
                                 has_files = True
-                                print(f"      已添加文件: {file.original_name}")
+                                print(f"已添加文件: {file.original_name}")
                             except Exception as e:
                                 skipped_files.append({
                                     'name': file.original_name,
@@ -413,41 +407,53 @@ def merge_project_files_to_pdf(project_id):
                                 })
                                 print(f"      文件处理错误: {file.original_name} - {str(e)}")
 
-                        # 任务合并完成后，创建一个任务完成页面
-                        task_complete_page = os.path.join(temp_dir, f"task_{task.id}_complete.pdf")
-                        if create_title_page(f"{task_path_title}", task_complete_page, font_size=16,
-                                             subtitle="任务合并完毕，插入新页面"):
-                            final_pdf_merger.append(task_complete_page)
-
         if not has_files:
             return None, "没有可合并的PDF文件"
 
         # 创建目录页
         toc_page = os.path.join(temp_dir, "toc.pdf")
-        if create_toc_page(toc_items, toc_page):
-            # 创建新的合并器，先放入目录，再放入之前的所有内容
-            complete_pdf_merger = PdfMerger()
-            complete_pdf_merger.append(toc_page)
+        create_toc_page(toc_items, toc_page)
 
-            # 将最终的合并内容存为临时文件
-            temp_final = os.path.join(temp_dir, "temp_final.pdf")
-            final_pdf_merger.write(temp_final)
-            final_pdf_merger.close()
+        # 创建项目标题页
+        project_title_page = os.path.join(temp_dir, "project_title.pdf")
+        create_title_page(project.name, project_title_page, font_size=24)
 
-            # 将临时文件添加到新的合并器
-            complete_pdf_merger.append(temp_final)
+        # 将临时文件添加到新的合并器
+        temp_final = os.path.join(temp_dir, "temp_final.pdf")
+        final_pdf_merger.write(temp_final)
+        final_pdf_merger.close()
 
-            # 生成最终PDF
-            output_filename = f"{project.name}_merged.pdf"
-            output_path = os.path.join(temp_dir, output_filename)
-            complete_pdf_merger.write(output_path)
-            complete_pdf_merger.close()
-        else:
-            # 如果目录创建失败，就使用原来的合并结果
-            output_filename = f"{project.name}_merged.pdf"
-            output_path = os.path.join(temp_dir, output_filename)
-            final_pdf_merger.write(output_path)
-            final_pdf_merger.close()
+        # 创建最终的合并器，按照顺序：项目标题页、目录页、内容
+        complete_pdf_merger = PdfMerger()
+
+        # 1. 首先添加项目标题页
+        complete_pdf_merger.append(project_title_page)
+
+        # 2. 然后添加目录页
+        complete_pdf_merger.append(toc_page)
+
+        # 3. 最后添加其他内容（但排除项目标题页，因为已经添加了）
+        # 创建一个临时的PdfReader和Writer来处理
+        reader = PdfReader(temp_final)
+        writer = PdfWriter()
+
+        # 跳过第一页（项目标题页），只添加剩余内容
+        for i in range(1, len(reader.pages)):
+            writer.add_page(reader.pages[i])
+
+        # 保存处理后的内容到临时文件
+        content_temp = os.path.join(temp_dir, "content_temp.pdf")
+        with open(content_temp, "wb") as f:
+            writer.write(f)
+
+        # 添加处理后的内容
+        complete_pdf_merger.append(content_temp)
+
+        # 生成最终PDF
+        output_filename = f"{project.name}_合并.pdf"
+        output_path = os.path.join(temp_dir, output_filename)
+        complete_pdf_merger.write(output_path)
+        complete_pdf_merger.close()
 
         # 复制到临时文件并返回
         temp_output = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')

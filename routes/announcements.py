@@ -17,7 +17,9 @@ announcement_bp = Blueprint('announcement', __name__)
 CORS(announcement_bp)
 
 # 为文件上传添加配置
-UPLOAD_FOLDER = 'uploads/announcements'
+# UPLOAD_FOLDER = 'uploads/announcements'
+# 设置群晖目录作为上传目录
+UPLOAD_FOLDER = '/volume1/web/FileManagementFolder/uploads/announcements'
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'zip', 'rar', 'png', 'jpg', 'jpeg',
                       'gif'}
 
@@ -34,8 +36,8 @@ def allowed_file(filename):
 @track_activity
 @token_required
 def create_announcement(current_user):
-    if current_user.role != 1:  # 检查是否是管理员
-        return jsonify({'error': '权限不足'}), 403
+    # if current_user.role != 1:  # 检查是否是管理员
+    #     return jsonify({'error': '权限不足'}), 403
 
     try:
         # 检查请求是否包含表单数据或 JSON
@@ -475,48 +477,6 @@ def update_read_status(current_user, announcement_id):
 
 
 # 管理员获取公告阅读状态统计
-# @announcement_bp.route('/announcements/<int:announcement_id>/read-statistics', methods=['GET'])
-# @track_activity
-# @token_required
-# def get_read_statistics(current_user, announcement_id):
-#     if current_user.role != 1:
-#         return jsonify({'error': '权限不足'}), 403
-#
-#     try:
-#         announcement = Announcement.query.get_or_404(announcement_id)
-#
-#         # 获取所有非管理员用户的阅读状态
-#         read_status = (AnnouncementReadStatus.query
-#                        .join(User)
-#                        .filter(AnnouncementReadStatus.announcement_id == announcement_id)
-#                        .all())
-#
-#         # 统计非管理员用户的数量和已读数量
-#         user_status = [{
-#             'user_id': status.user_id,
-#             'username': status.user.username,
-#             'is_read': status.is_read,
-#             'read_at': status.read_at.isoformat() if status.read_at else None,
-#             'role': status.user.role  # 添加用户角色信息
-#         } for status in read_status]
-#
-#         # 计算总数（所有用户，包括管理员）
-#         total_users = len(read_status)
-#         # 计算已读数（所有用户，包括管理员）
-#         read_users = sum(1 for status in read_status if status.is_read)
-#
-#         return jsonify({
-#             'announcement_id': announcement_id,
-#             'title': announcement.title,
-#             'total_users': total_users,
-#             'read_users': read_users,
-#             'read_percentage': (read_users / total_users * 100) if total_users > 0 else 0,
-#             'user_status': user_status
-#         })
-#
-#     except Exception as e:
-#         return jsonify({'error': str(e)}), 500
-
 @announcement_bp.route('/announcements/<int:announcement_id>/read-statistics', methods=['GET'])
 @track_activity
 @token_required

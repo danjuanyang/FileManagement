@@ -498,7 +498,7 @@ def get_users(current_user):
             project_list = [{
                 'id': project.id,
                 'name': project.name,
-                'progress': project.progress,
+                'progress': round(project.progress, 2) if project.progress else None,
                 'status': project.status,
                 'deadline': project.deadline.isoformat() if project.deadline else None
             } for project in projects]
@@ -964,6 +964,7 @@ def get_leader_team_members(current_user, leader_id):
         },
         'team_members': [{
             'id': member.id,
+            'role': member.role,
             'username': member.username
         } for member in team_members]
     })

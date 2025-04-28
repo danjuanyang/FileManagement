@@ -1,0 +1,22 @@
+version: '3'
+services:
+  python-app:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - DOCKER_REGISTRY_MIRROR=https://mirror.baidubce.com
+    container_name: python-app
+    restart: always
+    ports:
+      - "6543:6543"
+    volumes:
+      - .:/app
+      - /volume1/web/FileManagementFolder:/volume1/web/FileManagementFolder
+      - /volume1/web/FileManagement:/volume1/web/FileManagement
+      - /volume1/web/backup:/volume1/web/backup
+    environment:
+      - TZ=Asia/Shanghai
+    dns:
+      - 223.5.5.5  # 阿里DNS
+      - 114.114.114.114  # 国内通用DNS

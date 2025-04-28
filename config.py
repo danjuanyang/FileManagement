@@ -1,5 +1,6 @@
 # config.py
 import os
+import platform
 import sys
 import shutil
 import threading
@@ -13,38 +14,8 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import event
 from models import db
 
-def create_app():
-    app = Flask(__name__)
-    CORS(app)
 
-    migrate = Migrate(app, db)
-
-    #    # 获取Python解释器所在目录
-    python_dir = os.path.dirname(sys.executable)
-    # 构建数据库文件路径
-    db_path = os.path.join(python_dir, 'project.db')
-    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
-    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['SECRET_KEY'] = '9888898888'
-
-
-
-    # 群晖路径
-    # python_dir = '/volume1/web/FileManagementFolder/db'
-    # db_path = os.path.join(python_dir, 'project.db')
-    # app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
-
-    # 初始化数据库
-    db.init_app(app)
-
-    # 启动备份线程（新增）
-    start_backup_thread()
-
-    return app
-
-app = create_app()
-
-# === 新增备份相关 ===
+# === 新增备份相关函数（注意：必须在 create_app 之前定义） ===
 
 def backup_folders():
     source_dirs = {
@@ -72,14 +43,15 @@ def backup_folders():
 
                 print(f"{path} 已备份到 {zip_filename}")
 
-                # === 删除多余的备份，只保留最近5个 ===
+                # 清理多余备份
                 clean_old_backups(backup_dir, name, max_backups)
 
         except Exception as e:
             print(f"备份过程中出错: {e}")
 
-        # 每周备份一次（7天，单位秒）
+        # 每周备份一次
         time.sleep(7 * 24 * 60 * 60)
+
 
 def clean_old_backups(backup_dir, name_prefix, max_backups):
     """清理旧的备份文件，只保留最新的 max_backups 个"""
@@ -87,11 +59,10 @@ def clean_old_backups(backup_dir, name_prefix, max_backups):
     for file in os.listdir(backup_dir):
         if file.startswith(name_prefix) and file.endswith('.zip'):
             full_path = os.path.join(backup_dir, file)
-            backups.append((os.path.getctime(full_path), full_path))  # 用创建时间排序
+            backups.append((os.path.getctime(full_path), full_path))
 
-    backups.sort(reverse=True)  # 新的在前
+    backups.sort(reverse=True)
 
-    # 删除多余的
     for i in range(max_backups, len(backups)):
         try:
             os.remove(backups[i][1])
@@ -99,6 +70,42 @@ def clean_old_backups(backup_dir, name_prefix, max_backups):
         except Exception as e:
             print(f"删除备份文件时出错: {e}")
 
+
 def start_backup_thread():
     backup_thread = threading.Thread(target=backup_folders, daemon=True)
     backup_thread.start()
+
+
+# === 原来的 create_app 代码，基本不动 ===
+
+def create_app():
+    app = Flask(__name__)
+    CORS(app)
+
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['SECRET_KEY'] = '9888898888'
+
+    migrate = Migrate(app, db)
+
+    # 根据操作系统选择数据库路径
+    system_platform = platform.system()
+    if system_platform == 'Windows':
+        # Windows开发环境
+        print("当前环境：Windows（开发环境）")
+        python_dir = os.path.dirname(sys.executable)
+        db_path = os.path.join(python_dir, 'project.db')
+        app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
+    else:
+        # Linux生产环境（群晖）
+        print("当前环境：Linux（生产环境）")
+        python_dir = '/volume1/web/FileManagementFolder/db'
+        db_path = os.path.join(python_dir, 'project.db')
+        app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
+
+    # 初始化数据库
+    db.init_app(app)
+
+    return app
+
+
+app = create_app()

@@ -49,8 +49,8 @@ def backup_folders():
         except Exception as e:
             print(f"备份过程中出错: {e}")
 
-        # 每周备份一次
-        time.sleep(7 * 24 * 60 * 60)
+        # 每3天备份一次
+        time.sleep(3 * 24 * 60 * 60)
 
 
 def clean_old_backups(backup_dir, name_prefix, max_backups):

@@ -3,10 +3,11 @@ import os
 import sys
 import tempfile
 import time
+import zipfile
 
 from sqlalchemy import text
 # from sqlalchemy import Flask_SQLAlchemy, text
-from config import app, db
+from config import app, db, clean_old_backups
 from flask import request, jsonify, redirect, url_for
 import jwt
 import datetime
@@ -128,6 +129,48 @@ def logout():
     except Exception as e:
         return jsonify({'message': str(e)}), 401
 
+# 手动备份
+@app.route('/api/backup', methods=['POST'])
+@track_activity
+def backup_api():
+    success, message = run_backup_once()
+    if success:
+        return jsonify({"message": message}), 20023
+    else:
+        return jsonify({"message": message}), 500
+
+def run_backup_once():
+    source_dirs = {
+        'FileManagementFolder': '/volume1/web/FileManagementFolder',
+        'FileManagement': '/volume1/web/FileManagement'
+    }
+    backup_dir = '/volume1/web/backup'
+    max_backups = 5  # 最多保留5份
+
+    try:
+        if not os.path.exists(backup_dir):
+            os.makedirs(backup_dir)
+
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+
+        for name, path in source_dirs.items():
+            zip_filename = os.path.join(backup_dir, f"{name}_backup_{timestamp}.zip")
+            with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for root, dirs, files in os.walk(path):
+                    for file in files:
+                        abs_path = os.path.join(root, file)
+                        relative_path = os.path.relpath(abs_path, path)
+                        zipf.write(abs_path, arcname=relative_path)
+
+            print(f"{path} 已备份到 {zip_filename}")
+
+            # 清理多余备份
+            clean_old_backups(backup_dir, name, max_backups)
+
+        return True, "备份成功"
+    except Exception as e:
+        print(f"备份过程中出错: {e}")
+        return False, f"备份失败: {e}"
 
 # 注册
 def register():

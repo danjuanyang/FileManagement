@@ -633,50 +633,6 @@ def update_user(current_user, user_id):
 
 
 # 删除用户
-# @leader_bp.route('/users/<int:user_id>', methods=['DELETE'])
-# @token_required
-# def delete_user(current_user, user_id):
-#     if current_user.role not in [0, 1]:
-#         return jsonify({'error': '权限不足'}), 403
-#
-#     try:
-#         user = User.query.get_or_404(user_id)
-#
-#         # 检查是否删除自己
-#         if user.id == current_user.id:
-#             return jsonify({'error': '不能删除当前登录用户'}), 400
-#
-#         # 开始事务
-#         with db.session.begin_nested():
-#             # 先处理可能的关联数据
-#             # 获取用户关联的项目
-#             projects = Project.query.filter_by(employee_id=user.id).all()
-#             if projects:
-#                 for project in projects:
-#                     # 检查项目状态
-#                     if project.status == 'ongoing':
-#                         return jsonify({'error': f'用户有正在进行中的项目: {project.name}, 无法删除'}), 400
-#                     project.employee_id = None
-#
-#             # 将上传文件的用户ID置为空
-#             ProjectFile.query.filter_by(upload_user_id=user.id).update({'upload_user_id': None})
-#
-#             # 删除用户相关的编辑时间记录和补卡记录会通过 CASCADE 自动处理
-#
-#             # 删除用户
-#             db.session.delete(user)
-#
-#         # 提交事务
-#         db.session.commit()
-#         return jsonify({'message': '用户删除成功'})
-#
-#     except Exception as e:
-#         db.session.rollback()
-#         print(f"删除用户错误: {str(e)}")  # 添加日志输出
-#         return jsonify({'error': f'删除用户失败: {str(e)}'}), 500
-
-
-# 删除用户
 @leader_bp.route('/users/<int:user_id>', methods=['DELETE'])
 @token_required
 def delete_user(current_user, user_id):
@@ -774,7 +730,6 @@ def delete_user(current_user, user_id):
         db.session.rollback()
         print(f"删除用户错误: {str(e)}")  # 添加日志输出
         return jsonify({'error': f'删除用户失败: {str(e)}'}), 500
-
 
 
 @leader_bp.route('/users/<int:user_id>/change-password', methods=['PUT'])
@@ -1158,3 +1113,93 @@ def change_password(current_user):
         except Exception as e:
             db.session.rollback()
             return jsonify({'error': str(e)}), 500
+
+
+# 2025年4月28日16:50:57
+# 删除子项目
+@leader_bp.route('/delete-subproject', methods=['POST'])
+@track_activity
+@token_required
+def delete_subproject(current_user):
+    if current_user.role not in [0, 1]:  # 只有超管或领导可以删除
+        return jsonify({'error': '权限不足'}), 403
+
+    try:
+        data = request.get_json()
+        subproject_id = data.get('subproject_id')
+
+        if not subproject_id:
+            return jsonify({'error': '缺少子项目ID'}), 400
+
+        subproject = Subproject.query.get(subproject_id)
+
+        if not subproject:
+            return jsonify({'error': '子项目不存在'}), 404
+
+        # 删除子项目时，级联删除关联的阶段、任务、文件（因为模型里cascade已配置）
+        db.session.delete(subproject)
+
+        # 记录用户活动日志
+        UserActivityLog.log_activity(
+            user_id=current_user.id,
+            action_type='delete_subproject',
+            action_detail=f'删除子项目 ID={subproject_id}',
+            resource_type='subproject',
+            resource_id=subproject_id,
+            request_method=request.method,
+            endpoint=request.endpoint,
+            request_path=request.path,
+            status_code=200
+        )
+
+        db.session.commit()
+        return jsonify({'message': '子项目及其关联内容删除成功'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# 删除阶段
+@leader_bp.route('/delete-stage', methods=['POST'])
+@track_activity
+@token_required
+def delete_stage(current_user):
+    if current_user.role not in [0, 1]:
+        return jsonify({'error': '权限不足'}), 403
+
+    try:
+        data = request.get_json()
+        stage_id = data.get('stage_id')
+
+        if not stage_id:
+            return jsonify({'error': '缺少阶段ID'}), 400
+
+        stage = ProjectStage.query.get(stage_id)
+
+        if not stage:
+            return jsonify({'error': '阶段不存在'}), 404
+
+        # 删除阶段时，级联删除任务和文件（模型里cascade已配置）
+        db.session.delete(stage)
+
+        # 记录用户活动日志
+        UserActivityLog.log_activity(
+            user_id=current_user.id,
+            action_type='delete_stage',
+            action_detail=f'删除阶段 ID={stage_id}',
+            resource_type='stage',
+            resource_id=stage_id,
+            request_method=request.method,
+            endpoint=request.endpoint,
+            request_path=request.path,
+            ip_address=get_real_ip(),  # 获取客户端IP地址
+            status_code=200
+        )
+
+        db.session.commit()
+        return jsonify({'message': '阶段及其关联内容删除成功'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500

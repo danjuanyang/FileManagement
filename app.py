@@ -39,6 +39,7 @@ app.register_blueprint(training_bp, url_prefix='/api/training')
 
 app.register_blueprint(ai_bp, url_prefix='/api/ai')  # 注册AI蓝图
 
+
 # 用户登录接口
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -84,7 +85,7 @@ def register():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
-    role = data.get('role', 3) # 默认为普通用户
+    role = data.get('role', 3)  # 默认为普通用户
 
     if User.query.filter_by(username=username).first():
         return jsonify({'message': '用户名已存在'}), 400
@@ -129,13 +130,14 @@ def logout():
     except Exception as e:
         return jsonify({'message': str(e)}), 401
 
+
 # 手动备份
 @app.route('/api/backup', methods=['POST'])
 @track_activity
 def backup_api():
     success, message = run_backup_once()
     if success:
-        return jsonify({"message": message}), 20023
+        return jsonify({"message": message}), 200
     else:
         return jsonify({"message": message}), 500
 
@@ -145,7 +147,7 @@ def run_backup_once():
         'FileManagement': '/volume1/web/FileManagement'
     }
     backup_dir = '/volume1/web/backup'
-    max_backups = 5  # 最多保留5份
+    max_backups = 10  # 最多保留10份,2个备份文件每个5份
 
     try:
         if not os.path.exists(backup_dir):
@@ -171,6 +173,7 @@ def run_backup_once():
     except Exception as e:
         print(f"备份过程中出错: {e}")
         return False, f"备份失败: {e}"
+
 
 # 注册
 def register():

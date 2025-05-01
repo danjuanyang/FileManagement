@@ -23,7 +23,7 @@ def backup_folders():
         'FileManagement': '/volume1/web/FileManagement'
     }
     backup_dir = '/volume1/web/backup'
-    max_backups = 5  # 最多保留5份
+    max_backups = 10  # 最多保留10份,2个备份文件每个5份
 
     while True:
         try:
@@ -75,8 +75,6 @@ def start_backup_thread():
     backup_thread = threading.Thread(target=backup_folders, daemon=True)
     backup_thread.start()
 
-
-# === 原来的 create_app 代码，基本不动 ===
 
 def create_app():
     app = Flask(__name__)

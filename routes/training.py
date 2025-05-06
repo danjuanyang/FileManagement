@@ -17,15 +17,7 @@ from routes.filemanagement import python_dir
 from utils.activity_tracking import track_activity
 import urllib.parse
 
-# 用于缓存的 Redis 集成（带回退）
-try:
-    import redis
 
-    redis_client = redis.Redis(host='localhost', port=6379, db=0)
-    REDIS_AVAILABLE = True
-except (ImportError, redis.exceptions.ConnectionError):
-    REDIS_AVAILABLE = False
-    print("Redis 不可用，回退到基于文件的缓存")
 
 # 创建蓝图
 training_bp = Blueprint('training', __name__)
@@ -104,64 +96,6 @@ def generate_cache_key(file_path, scale=2.0):
 def get_cache_file_path(cache_key):
     """获取缓存文件路径"""
     return os.path.join(CACHE_DIR, f"{cache_key}.json")
-
-
-def save_cache(cache_key, data):
-    """保存数据到缓存中"""
-    if REDIS_AVAILABLE:
-        try:
-            # 将数据保存到Redis（使用JSON转换以便处理binary数据）
-            redis_client.setex(
-                cache_key,
-                CACHE_EXPIRY,
-                json.dumps({
-                    'timestamp': time.time(),
-                    'data': data
-                })
-            )
-            return True
-        except Exception as e:
-            print(f"Redis缓存失败，切换到文件缓存: {str(e)}")
-
-    # 文件缓存备选方案
-    try:
-        cache_file = get_cache_file_path(cache_key)
-        with open(cache_file, 'w') as f:
-            json.dump({
-                'timestamp': time.time(),
-                'data': data
-            }, f)
-        return True
-    except Exception as e:
-        print(f"文件缓存失败: {str(e)}")
-        return False
-
-
-def get_cache(cache_key):
-    """从缓存获取数据"""
-    if REDIS_AVAILABLE:
-        try:
-            cached_data = redis_client.get(cache_key)
-            if cached_data:
-                return json.loads(cached_data)
-        except Exception as e:
-            print(f"Redis获取缓存失败，切换到文件缓存: {str(e)}")
-
-    # 文件缓存备选方案
-    cache_file = get_cache_file_path(cache_key)
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file, 'r') as f:
-                cache_data = json.load(f)
-                # 检查缓存是否已过期
-                if time.time() - cache_data['timestamp'] < CACHE_EXPIRY:
-                    return cache_data['data']
-                # 过期则删除缓存文件
-                os.remove(cache_file)
-        except Exception as e:
-            print(f"文件缓存读取失败: {str(e)}")
-
-    return None
 
 
 # 分配培训任务

@@ -6,12 +6,11 @@ import time
 import zipfile
 
 from sqlalchemy import text
-# from sqlalchemy import Flask_SQLAlchemy, text
-from config import app, db, clean_old_backups
-from flask import request, jsonify, redirect, url_for
+from config import app, db, clean_old_backups, start_backup_scheduler
+from flask import request, jsonify
 import jwt
 import datetime
-from models import User, Project, UserSession, UserActivityLog
+from models import User, UserSession, UserActivityLog
 from routes.AI_assistant import ai_bp
 from routes.admin import admin_bp
 from routes.announcements import announcement_bp
@@ -38,6 +37,7 @@ app.register_blueprint(admin_bp, url_prefix='/api/admin')
 app.register_blueprint(training_bp, url_prefix='/api/training')
 
 app.register_blueprint(ai_bp, url_prefix='/api/ai')  # 注册AI蓝图
+
 
 # 用户登录接口
 @app.route('/api/login', methods=['POST'])
@@ -84,7 +84,7 @@ def register():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
-    role = data.get('role', 3) # 默认为普通用户
+    role = data.get('role', 3)  # 默认为普通用户
 
     if User.query.filter_by(username=username).first():
         return jsonify({'message': '用户名已存在'}), 400
@@ -129,20 +129,23 @@ def logout():
     except Exception as e:
         return jsonify({'message': str(e)}), 401
 
+
 # 手动备份
 @app.route('/api/backup', methods=['POST'])
 @track_activity
 def backup_api():
     success, message = run_backup_once()
     if success:
-        return jsonify({"message": message}), 20023
+        return jsonify({"message": message}), 200
     else:
         return jsonify({"message": message}), 500
 
+
 def run_backup_once():
     source_dirs = {
-        'FileManagementFolder': '/volume1/web/FileManagementFolder',
-        'FileManagement': '/volume1/web/FileManagement'
+        'FileManagementFolder': '/volume1/web/FileManagementFolder',  # 后端数据和文件
+        'FileManagement': '/volume1/web/FileManagement',  # 后端源码
+        'Dist': '/volume1/docker/nginx',  # 前端打包的文件
     }
     backup_dir = '/volume1/web/backup'
     max_backups = 5  # 最多保留5份
@@ -172,6 +175,7 @@ def run_backup_once():
         print(f"备份过程中出错: {e}")
         return False, f"备份失败: {e}"
 
+
 # 注册
 def register():
     data = request.get_json()
@@ -192,6 +196,8 @@ def register():
 
 
 if __name__ == '__main__':
+    # 启动定时任务
+    start_backup_scheduler()
     with app.app_context():
         db.create_all()
 

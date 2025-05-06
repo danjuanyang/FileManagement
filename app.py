@@ -148,7 +148,7 @@ def run_backup_once():
         'Dist': '/volume1/docker/nginx',  # 前端打包的文件
     }
     backup_dir = '/volume1/web/backup'
-    max_backups = 5  # 最多保留5份
+    max_backups = 10  # 最多保留10份,2个备份文件每个5份
 
     try:
         if not os.path.exists(backup_dir):

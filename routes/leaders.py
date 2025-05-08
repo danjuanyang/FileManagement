@@ -162,7 +162,9 @@ def get_project_files(project_id):
 @leader_bp.route('/employees', methods=['GET'])
 @track_activity
 def get_employees():
-    employees = User.query.filter_by(role=2).all()
+    # employees = User.query.filter_by(role=2).all()
+    # 查询role-2和3
+    employees = User.query.filter(User.role.in_([2, 3])).all()
     return jsonify({
         'employees': [{
             'id': e.id,

@@ -576,7 +576,7 @@ def update_task(current_user, id):
     db.session.commit()
 
     # 更新阶段进度
-    update_stage_progress(task.stage_id)
+    _recalculate_stage_progress_from_tasks(task.stage_id)
 
     return jsonify({'message': '任务更新成功'}), 200
 
@@ -633,7 +633,7 @@ def delete_task(current_user, id):
         db.session.commit()
 
         # 删除任务后更新阶段进度
-        update_stage_progress(stage_id)
+        _recalculate_stage_progress_from_tasks(stage_id)
 
         return jsonify({'message': '任务删除成功'}), 200
 
@@ -779,55 +779,41 @@ def export_project_plan(project_id):
 
 
 # ------------------ 帮助程序函数------------------
-
 # 更新阶段数据
-@projectplan_bp.route('/stages/<int:id>', methods=['PUT'])
-@track_activity
-@token_required
-def update_stage_progress(current_user, id):
-    stage = ProjectStage.query.get_or_404(id)
+def update_stage_progress(stage_id):
+    """根据任务进度更新阶段进度"""
+    stage = ProjectStage.query.get(stage_id)
+    if not stage:
+        return False
 
-    # 获取子项目和项目信息用于权限检查
-    subproject = Subproject.query.get(stage.subproject_id)
-    if not subproject:
-        return jsonify({'error': '未找到关联的子项目'}), 404
+    tasks = StageTask.query.filter_by(stage_id=stage_id).all()
 
-    project = Project.query.get(stage.project_id)
-    if not project:
-        return jsonify({'error': '未找到关联的项目'}), 404
+    if not tasks:
+        stage.progress = 0
+        stage.status = 'pending'  # 一个没有任务的阶段应该是 'pending'
+    else:
+        # 计算平均进度
+        total_task_progress = sum(task.progress for task in tasks)
+        stage.progress = total_task_progress / len(tasks)
 
-    # 权限检查
-    if current_user.role > 2:  # 组员
-        # 组员只能更新分配给自己的子项目的阶段
-        if subproject.employee_id != current_user.id:
-            return jsonify({'error': '您没有权限更新此阶段'}), 403
-    elif current_user.role == 2:  # 组长
-        # 组长只能更新自己负责的项目下的阶段
-        if project.employee_id != current_user.id:
-            return jsonify({'error': '您没有权限更新此阶段'}), 403
-
-    data = request.get_json()
-
-    if 'name' in data:
-        stage.name = data['name']
-    if 'description' in data:
-        stage.description = data['description']
-    if 'startDate' in data:
-        stage.start_date = datetime.strptime(data['startDate'], '%Y-%m-%d')
-    if 'endDate' in data:
-        stage.end_date = datetime.strptime(data['endDate'], '%Y-%m-%d')
-    if 'progress' in data:
-        stage.progress = data['progress']
-    if 'status' in data:
-        stage.status = data['status']
+        # 更新阶段状态
+        if all(t.status == 'completed' for t in tasks):
+            stage.status = 'completed'
+        # 如果不是所有任务都完成，那么检查是否所有任务都是 pending (且没有 in_progress)
+        # （注意：如果存在 in_progress 的任务，则应优先判定为 in_progress）
+        elif all(t.status == 'pending' for t in tasks) and not any(t.status == 'in_progress' for t in tasks):
+            stage.status = 'pending'
+        else:
+            # 其他所有情况 (例如：混合了 pending 和 completed, 或者有 in_progress 的任务)
+            # 都应该将 Stage 状态置为 'in_progress'
+            stage.status = 'in_progress'
 
     db.session.commit()
 
-    # 如果状态变为完成，可能需要更新子项目状态
-    if stage.status == 'completed':
-        update_subproject_progress(stage.subproject_id)
+    # 更新子项目进度
+    _recalculate_stage_progress_from_tasks(stage.subproject_id)
 
-    return jsonify({'message': '阶段更新成功'}), 200
+    return True
 
 
 # 更新阶段数据
@@ -972,36 +958,39 @@ def get_team_members(current_user):
     })
 
 
-# 添加一个任务进度更新函数，与路由函数分开
-def update_stage_progress(stage_id):
-    """根据任务进度更新阶段进度"""
+# 根据任务进度更新阶段进度，并同步状态
+def _recalculate_stage_progress_from_tasks(stage_id):
     stage = ProjectStage.query.get(stage_id)
     if not stage:
+        print(f"错误：在 _recalculate_stage_progress_from_tasks 中未找到 ID 为 {stage_id} 的阶段")
         return False
 
     tasks = StageTask.query.filter_by(stage_id=stage_id).all()
 
-    # 如果没有任务，阶段进度设为0
     if not tasks:
         stage.progress = 0
+        stage.status = 'pending'  # 一个没有任务的阶段应该是 'pending'
+    else:
+        # 计算平均进度
+        total_task_progress = sum(task.progress for task in tasks)
+        stage.progress = total_task_progress / len(tasks)
+
+        # 更新阶段状态 (这是我之前建议的修正逻辑)
+        if all(t.status == 'completed' for t in tasks):
+            stage.status = 'completed'
+        elif all(t.status == 'pending' for t in tasks) and not any(t.status == 'in_progress' for t in tasks):
+            stage.status = 'pending'
+        else:
+            # 其他所有情况 (例如：混合了 pending 和 completed, 或者有 in_progress 的任务)
+            # 都应该将 Stage 状态置为 'in_progress'
+            stage.status = 'in_progress'
+
+    try:
         db.session.commit()
-        return True
-
-    # 计算平均进度
-    total_progress = sum(task.progress for task in tasks)
-    stage.progress = total_progress / len(tasks)
-
-    # 更新阶段状态
-    if all(task.status == 'completed' for task in tasks) and tasks:
-        stage.status = 'completed'
-    elif any(task.status == 'in_progress' for task in tasks):
-        stage.status = 'in_progress'
-    elif all(task.status == 'pending' for task in tasks):
-        stage.status = 'pending'
-
-    db.session.commit()
-
-    # 更新子项目进度
-    update_subproject_progress(stage.subproject_id)
-
+        # 更新子项目进度
+        update_subproject_progress(stage.subproject_id)  # 确保这个函数调用是正确的
+    except Exception as e:
+        db.session.rollback()
+        print(f"在 _recalculate_stage_progress_from_tasks 中提交或更新子项目时发生错误: {str(e)}")
+        return False
     return True

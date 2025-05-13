@@ -29,7 +29,7 @@ app.register_blueprint(employee_bp, url_prefix='/api/employee')
 app.register_blueprint(projectplan_bp, url_prefix='/api/projectplan')
 
 app.register_blueprint(files_bp, url_prefix='/api/files')
-app.register_blueprint(merge_bp, url_prefix='/api/files')
+app.register_blueprint(merge_bp, url_prefix='/api/filles')
 app.register_blueprint(announcement_bp, url_prefix='/api/announcements')
 
 app.register_blueprint(admin_bp, url_prefix='/api/admin')

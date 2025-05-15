@@ -542,7 +542,7 @@ def generate_paged_preview_data(project_id, merge_config, selected_file_ids=None
             current_app.logger.error(f"转换前无法读取基本合并的 PDF： {read_error}")
             num_pages_to_convert = "Unknown"  # 类型：忽略
 
-        images = convert_from_path(base_merged_pdf_path, dpi=100, fmt='png')
+        images = convert_from_path(base_merged_pdf_path, dpi=100, fmt='jpeg')
         current_app.logger.info(f"已成功将 PDF 转换为 {len(images)}PIL 图像。")
 
         if num_pages_to_convert != "未知" and int(num_pages_to_convert) != len(images):  # 类型：忽略
@@ -550,10 +550,10 @@ def generate_paged_preview_data(project_id, merge_config, selected_file_ids=None
                 f"Mismatch: Expected {num_pages_to_convert} pages, but converted {len(images)} images.")
 
         for i, image in enumerate(images):
-            image_filename = f"page_{i}.png"
+            image_filename = f"page_{i}.jpeg"
             image_path_abs = os.path.join(session_image_dir_abs, image_filename)
             current_app.logger.debug(f"  为页面保存图像 {i} to {image_path_abs}")
-            image.save(image_path_abs, "PNG")
+            image.save(image_path_abs, "JPEG")
 
             image_url = url_for('file_merge_refactored.serve_temp_preview_image',
                                 session_id=preview_session_id,

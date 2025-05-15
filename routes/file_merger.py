@@ -5,20 +5,19 @@ import shutil
 import tempfile
 import io
 import uuid
-from datetime import datetime
 
 from PyPDF2 import PdfMerger, PdfReader, PdfWriter
 from reportlab.pdfgen import canvas as reportlab_canvas  # 为避免冲突而重命名
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase.pdfmetrics import registerFontFamily
 
-from flask import current_app, jsonify, url_for
+from flask import current_app,url_for
 from pdf2image import convert_from_path
 from pdf2image.exceptions import (
     PDFInfoNotInstalledError,
@@ -26,12 +25,7 @@ from pdf2image.exceptions import (
     PDFSyntaxError
 )
 
-# Import necessary models
-# Ensure this import works relative to your project structure
-# If file_merger.py is in a 'routes' or similar subdir, you might need:
-# from ..models import db, Project, ProjectFile, ProjectStage, User, StageTask, Subproject
-# Assuming it's at a level where 'models' is directly importable:
-from models import db, Project, ProjectFile, ProjectStage, User, StageTask, Subproject
+from models import Project, ProjectFile, ProjectStage, StageTask, Subproject
 
 # --- Font Setup ---
 FONT_NAME = 'SimSun'
@@ -40,16 +34,16 @@ TEMP_PREVIEW_IMAGE_SUBDIR = 'temp_preview_images'
 
 
 def setup_fonts():
-    """Sets up the SimSun font for ReportLab."""
+    """设置 ReportLab 的 SimSun 字体."""
     try:
-        # Attempt to find font relative to application root
+        # 尝试查找相对于应用程序根目录的字体
         font_path_app_root = os.path.join(current_app.root_path, 'fonts', 'simsun.ttf')
-        # Attempt to find font relative to the script's directory structure
+        # 尝试查找相对于脚本目录结构的字体
         font_path_script_relative = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'fonts',
                                                  'simsun.ttf')
-        # Attempt to find font in a system location (Windows example)
+        # 尝试在系统位置查找字体（Windows 示例）
         font_path_system = os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'Fonts',
-                                        'simsun.ttc')  # .ttc often contains simsun
+                                        'simsun.ttc')  # .ttc通常包含 Simsun
 
         font_path = None
         if os.path.exists(font_path_app_root):
@@ -57,34 +51,34 @@ def setup_fonts():
         elif os.path.exists(font_path_script_relative):
             font_path = font_path_script_relative
         elif os.path.exists(font_path_system):
-            font_path = font_path_system  # Use system font if found
+            font_path = font_path_system  # 如果找到，请使用系统字体
         else:
             current_app.logger.error(
-                f"Font simsun.ttf/.ttc not found in checked locations: {font_path_app_root}, {font_path_script_relative}, {font_path_system}")
+                f"在选中的位置找不到字体 simsun.ttf/.ttc: {font_path_app_root}, {font_path_script_relative}, {font_path_system}")
             return False
 
         if FONT_NAME not in pdfmetrics.getRegisteredFontNames():
-            current_app.logger.info(f"Registering font: {FONT_NAME} from {font_path}")
-            pdfmetrics.registerFont(TTFont(FONT_NAME, font_path))  # Use the found path
+            current_app.logger.info(f"注册字体： {FONT_NAME} from {font_path}")
+            pdfmetrics.registerFont(TTFont(FONT_NAME, font_path))  # 使用找到的路径
             registerFontFamily(FONT_NAME, normal=FONT_NAME, bold=FONT_NAME, italic=FONT_NAME, boldItalic=FONT_NAME)
         return True
     except Exception as e:
-        current_app.logger.error(f"Font setup failed: {str(e)}", exc_info=True)
+        current_app.logger.error(f"字体设置失败：{str(e)}", exc_info=True)
         return False
 
 
-# --- PDF Generation Utilities ---
+# ---PDF 生成实用程序 ---
 
 def create_dynamic_title_page(title_text, output_path, subtitle_text=None, font_size=24):
-    """Creates a title page with dynamic main title and optional subtitle."""
+    """创建具有动态主标题和可选副标题的标题页。"""
     if not setup_fonts():
-        current_app.logger.warning("Font setup failed during title page creation. Default font might be used.")
+        current_app.logger.warning("创建标题页期间字体设置失败。可能会使用默认字体.")
 
     c = reportlab_canvas.Canvas(output_path, pagesize=A4)
     width, height = A4
-    default_font = "Helvetica"  # Fallback font
+    default_font = "Helvetica"  # 回退字体
 
-    # Determine which font to use
+    # 确定要使用的字体
     font_to_use = FONT_NAME if FONT_NAME in pdfmetrics.getRegisteredFontNames() else default_font
 
     try:
@@ -99,12 +93,12 @@ def create_dynamic_title_page(title_text, output_path, subtitle_text=None, font_
             c.setFont(font_to_use, subtitle_font_size)
             subtitle_width = c.stringWidth(subtitle_text, font_to_use, subtitle_font_size)
             x_subtitle = (width - subtitle_width) / 2
-            y_subtitle = y_title - font_size - 10  # Adjust spacing as needed
+            y_subtitle = y_title - font_size - 10  # 根据需要调整间距
             c.drawString(x_subtitle, y_subtitle, subtitle_text)
 
     except Exception as e:
-        current_app.logger.error(f"Error drawing text on title page (using font {font_to_use}): {e}", exc_info=True)
-        # Attempt fallback drawing if primary fails
+        current_app.logger.error(f"在标题页上绘制文本时出错 (使用字体{font_to_use}): {e}", exc_info=True)
+        # 如果主数据库失败，则尝试回退绘制
         if font_to_use != default_font:
             try:
                 c.setFont(default_font, font_size)
@@ -119,9 +113,9 @@ def create_dynamic_title_page(title_text, output_path, subtitle_text=None, font_
                     x_subtitle = (width - subtitle_width) / 2
                     y_subtitle = y_title - font_size - 10
                     c.drawString(x_subtitle, y_subtitle, subtitle_text)
-                current_app.logger.warning("Fell back to Helvetica for title page due to error.")
+                current_app.logger.warning("由于错误，退回到 Helvetica 的标题页.")
             except Exception as fallback_e:
-                current_app.logger.error(f"Fallback drawing also failed: {fallback_e}", exc_info=True)
+                current_app.logger.error(f"回退绘制失败： {fallback_e}", exc_info=True)
 
     c.showPage()
     c.save()
@@ -129,9 +123,9 @@ def create_dynamic_title_page(title_text, output_path, subtitle_text=None, font_
 
 
 def create_toc_pdf_page(toc_items, output_path, max_level=4):
-    """Creates a Table of Contents PDF page."""
+    """创建目录 PDF 页面。"""
     if not setup_fonts():
-        current_app.logger.warning("Font setup failed during TOC page creation. Default font might be used.")
+        current_app.logger.warning("创建 TOC 页面期间字体设置失败。可能会使用默认字体.")
 
     doc = SimpleDocTemplate(output_path, pagesize=A4,
                             leftMargin=2 * cm, rightMargin=2 * cm,
@@ -140,7 +134,7 @@ def create_toc_pdf_page(toc_items, output_path, max_level=4):
     story = []
 
     default_font_name = "Helvetica" if FONT_NAME not in pdfmetrics.getRegisteredFontNames() else FONT_NAME
-    current_app.logger.info(f"Using font '{default_font_name}' for TOC.")
+    current_app.logger.info(f"使用字体 '{default_font_name}' for TOC.")
 
     title_style = ParagraphStyle('TocTitle', parent=styles['h1'], fontName=default_font_name, fontSize=18, alignment=1,
                                  spaceAfter=20)
@@ -162,7 +156,7 @@ def create_toc_pdf_page(toc_items, output_path, max_level=4):
         text = item.get('text', 'Untitled')
         if level > max_level:
             continue
-        # Ensure text is a string
+        # 确保文本为字符串
         safe_text = str(text) if text is not None else 'Untitled'
         try:
             para = Paragraph(safe_text, level_styles.get(level, level_styles[4]))
@@ -170,39 +164,39 @@ def create_toc_pdf_page(toc_items, output_path, max_level=4):
             if item.get('files'):
                 for file_name_in_toc in item['files']:
                     safe_file_name = str(file_name_in_toc) if file_name_in_toc is not None else 'Untitled File'
-                    file_para = Paragraph(safe_file_name, level_styles[4])  # Use level 4 style for files under task
+                    file_para = Paragraph(safe_file_name, level_styles[4])  # 对任务下的文件使用级别 4 样式
                     story.append(file_para)
         except Exception as e:
-            current_app.logger.error(f"Error creating paragraph for TOC item: {safe_text} (Level {level}). Error: {e}",
+            current_app.logger.error(f"为 TOC 项目创建段落时出错：{safe_text} (Level {level}). Error: {e}",
                                      exc_info=True)
-            # Optionally append a placeholder paragraph indicating the error
-            error_para = Paragraph(f"[Error processing item: {safe_text[:30]}...]", styles['Normal'])
+            # （可选）附加一个占位符段落，指示错误
+            error_para = Paragraph(f"[处理项目时出错： {safe_text[:30]}...]", styles['Normal'])
             story.append(error_para)
 
     try:
         doc.build(story)
     except Exception as e:
-        current_app.logger.error(f"Failed to build TOC PDF document: {e}", exc_info=True)
-        # Handle build failure, maybe return None or raise
-        return None  # Indicate failure
+        current_app.logger.error(f"无法构建 TOC PDF 文档： {e}", exc_info=True)
+        # 处理构建失败，可能返回 None 或 raise
+        return None  # 表示失败
     return output_path
 
 
 def add_page_numbers_to_pdf(input_pdf_path, output_pdf_path):
-    """Adds page numbers (Page X of Y) to each page of a PDF."""
+    """将页码（第 X 页，共第 Y 页）添加到 PDF 的每一页。"""
     if not setup_fonts():
-        current_app.logger.warning("Font setup failed for page numbering. Default font might be used.")
+        current_app.logger.warning("页码的字体设置失败。可能会使用默认字体.")
 
     reader = PdfReader(input_pdf_path)
     writer = PdfWriter()
     num_pages = len(reader.pages)
 
     default_font_name = "Helvetica" if FONT_NAME not in pdfmetrics.getRegisteredFontNames() else FONT_NAME
-    current_app.logger.info(f"Using font '{default_font_name}' for page numbers.")
+    current_app.logger.info(f"对页码使用字体'{default_font_name}' ")
 
     for i, page in enumerate(reader.pages):
         packet = io.BytesIO()
-        # Use page dimensions from the reader
+        # 使用 Reader 中的页面尺寸
         page_width = float(page.mediabox.width)
         page_height = float(page.mediabox.height)
         can = reportlab_canvas.Canvas(packet, pagesize=(page_width, page_height))
@@ -210,77 +204,77 @@ def add_page_numbers_to_pdf(input_pdf_path, output_pdf_path):
         try:
             page_number_text = f"第 {i + 1} 页 / 共 {num_pages} 页"
             font_size = 9
-            can.setFont(default_font_name, font_size)  # Use determined font
+            can.setFont(default_font_name, font_size)  # 使用确定的字体
             text_width = can.stringWidth(page_number_text, default_font_name, font_size)
             x_pos = (page_width - text_width) / 2
-            y_pos = 1 * cm  # Position from bottom
+            y_pos = 1 * cm  # 位置从下开始
             can.drawString(x_pos, y_pos, page_number_text)
         except Exception as e:
-            current_app.logger.error(f"Error drawing page number on page {i + 1}: {e}", exc_info=True)
-            # Attempt fallback if primary fails (e.g., font issue)
+            current_app.logger.error(f"在页面上绘制页码时出错 {i + 1}: {e}", exc_info=True)
+            # 如果主数据库失败（例如字体问题），则尝试回退
             if default_font_name != "Helvetica":
                 try:
                     can.setFont("Helvetica", font_size)
                     text_width = can.stringWidth(page_number_text, "Helvetica", font_size)
                     x_pos = (page_width - text_width) / 2
                     can.drawString(x_pos, y_pos, page_number_text)
-                    current_app.logger.warning(f"Fell back to Helvetica for page number on page {i + 1}.")
+                    current_app.logger.warning(f"回退到 Helvetica 获取 pag 上的页码e {i + 1}.")
                 except Exception as fallback_e:
-                    current_app.logger.error(f"Fallback page number drawing failed for page {i + 1}: {fallback_e}",
+                    current_app.logger.error(f"页面的回退页码绘制失败 {i + 1}: {fallback_e}",
                                              exc_info=True)
 
         can.save()
         packet.seek(0)
         watermark_pdf = PdfReader(packet)
-        # Ensure watermark page exists before merging
+        # 合并前确保水印页面存在
         if watermark_pdf.pages:
             page.merge_page(watermark_pdf.pages[0])
         else:
-            current_app.logger.warning(f"Watermark PDF for page {i + 1} was empty.")
+            current_app.logger.warning(f"页面水印 PDF {i + 1} 为空.")
         writer.add_page(page)
 
     try:
         with open(output_pdf_path, "wb") as f:
             writer.write(f)
     except Exception as e:
-        current_app.logger.error(f"Failed to write final PDF with page numbers: {e}", exc_info=True)
+        current_app.logger.error(f"无法编写包含页码的最终 PDF: {e}", exc_info=True)
         return None  # Indicate failure
     return output_pdf_path
 
 
 def extract_prefix_number(filename):
-    """Extracts prefix numbers for sorting files."""
-    if not filename: return float('inf')  # Handle None or empty filenames
-    match = re.match(r'^(\d+)', str(filename))  # Ensure filename is string
+    """提取前缀编号以对文件进行排序."""
+    if not filename: return float('inf')  # 处理 None 或空文件名
+    match = re.match(r'^(\d+)', str(filename))  # 确保 filename 为 string
     return int(match.group(1)) if match else float('inf')
 
 
 def sort_files_by_prefix(files):
-    """Sorts ProjectFile objects by their original_name's prefix number."""
+    """按对象的original_name的前缀编号对 ProjectFile 对象进行排序."""
     return sorted(files, key=lambda x: extract_prefix_number(x.original_name))
 
 
 def generate_toc_items_structure(project_id, selected_file_ids=None, max_level=4):
-    """Generates a structured list of items for the Table of Contents."""
+    """为目录生成结构化的项目列表."""
     project = Project.query.get(project_id)
     if not project:
-        current_app.logger.warning(f"generate_toc_items_structure: Project with ID {project_id} not found.")
+        current_app.logger.warning(f"generate_toc_items_structure：ID 为 的项目 {project_id} 未找到.")
         return []
 
     toc_items = []
     current_app.logger.debug(
-        f"Generating TOC structure for Project: {project.name} (ID: {project.id}), Max Level: {max_level}")
+        f"为项目生成 TOC 结构: {project.name} (ID: {project.id}), 最高层级：{max_level}")
 
     if max_level >= 1:
         toc_items.append({'level': 1, 'text': project.name, 'id': f"project_{project.id}"})
         current_app.logger.debug(f"  Added Level 1: {project.name}")
 
-    # Ensure consistent ordering
+    # 确保排序一致
     subprojects = Subproject.query.filter_by(project_id=project.id).order_by(Subproject.name).all()
     current_app.logger.debug(f"  Found {len(subprojects)} subprojects.")
 
     for subproject in subprojects:
-        subproject_text = f"{project.name} - {subproject.name}"  # Example format
+        subproject_text = f"{project.name} - {subproject.name}"  # 示例格式
         if max_level >= 2:
             toc_items.append({'level': 2, 'text': subproject_text, 'id': f"subproject_{subproject.id}"})
             current_app.logger.debug(f"    Added Level 2: {subproject_text}")
@@ -289,7 +283,7 @@ def generate_toc_items_structure(project_id, selected_file_ids=None, max_level=4
         current_app.logger.debug(f"    Subproject '{subproject.name}' has {len(stages)} stages.")
 
         for stage in stages:
-            stage_text = f"{subproject.name} - {stage.name}"  # Example format
+            stage_text = f"{subproject.name} - {stage.name}"  # 示例格式
             if max_level >= 3:
                 toc_items.append({'level': 3, 'text': stage_text, 'id': f"stage_{stage.id}"})
                 current_app.logger.debug(f"      Added Level 3: {stage_text}")
@@ -298,23 +292,23 @@ def generate_toc_items_structure(project_id, selected_file_ids=None, max_level=4
             current_app.logger.debug(f"      Stage '{stage.name}' has {len(tasks)} tasks.")
 
             for task in tasks:
-                task_text = f"{stage.name} - {task.name}"  # Example format
-                # Query for files associated with this task
+                task_text = f"{stage.name} - {task.name}"  # 示例格式
+                # 查询与此任务关联的文件
                 query = ProjectFile.query.filter_by(task_id=task.id,
-                                                    project_id=project.id)  # Ensure project_id filter is present if files can belong to project directly
+                                                    project_id=project.id)  # 如果文件可以直接属于项目project_id请确保存在过滤器
 
-                # Filter by selected file IDs if provided
+                # 按所选文件 ID 过滤（如果提供）
                 if selected_file_ids:
                     current_app.logger.debug(
                         f"        Filtering task '{task.name}' files by selected IDs: {selected_file_ids}")
                     query = query.filter(ProjectFile.id.in_(selected_file_ids))
 
-                # Filter for PDF files specifically for TOC file listing
+                # 筛选专门用于 TOC 文件列表的 PDF 文件
                 task_files_query = query.filter(ProjectFile.file_name.ilike('%.pdf'))
                 task_files = sort_files_by_prefix(task_files_query.all())  # Execute query
 
                 current_app.logger.debug(
-                    f"        Task '{task.name}' has {len(task_files)} relevant PDF files after filtering.")
+                    f"       任务 '{task.name}' has {len(task_files)}过滤后的相关 PDF 文件.")
 
                 if task_files and max_level >= 4:
                     file_names_for_toc = [f.original_name for f in task_files]
@@ -323,9 +317,9 @@ def generate_toc_items_structure(project_id, selected_file_ids=None, max_level=4
                     current_app.logger.debug(f"        Added Level 4: {task_text} with files: {file_names_for_toc}")
                 elif not task_files and max_level >= 4:
                     current_app.logger.debug(
-                        f"        Task '{task.name}' has no PDF files matching criteria for Level 4 TOC entry.")
+                        f"        Task '{task.name}'没有 PDF 文件与级别 4 TOC 条目的条件匹配。")
 
-    current_app.logger.debug(f"Finished generating TOC structure. Total items: {len(toc_items)}")
+    current_app.logger.debug(f"完成生成 TOC 结构。总项目： {len(toc_items)}")
     return toc_items
 
 
@@ -342,7 +336,7 @@ def get_pdf_file_paths_for_merging(project_id, selected_file_ids=None):
         return []
 
     # 定义上传文件的基础目录 (根据你的实际配置修改)
-    upload_base_directory = os.path.join(current_app.root_path, 'uploads')  # 假设存储在 应用根目录/uploads/ 下
+    upload_base_directory = os.path.join(current_app.root_path, 'uploads')  # 存储在 应用根目录/uploads/ 下
     current_app.logger.debug(f"使用的上传基础目录: {upload_base_directory}")
 
     # 保持结构顺序: Subproject -> Stage -> Task -> Files (已排序)
@@ -371,30 +365,30 @@ def get_pdf_file_paths_for_merging(project_id, selected_file_ids=None):
                     stored_path = pf_obj.file_path
 
                     if not stored_path:
-                        current_app.logger.warning(f"            文件 ID={pf_obj.id} 的 stored_path 为空, 跳过。")
+                        current_app.logger.warning(f"文件 ID={pf_obj.id} 的 stored_path 为空, 跳过。")
                         continue
 
                     if os.path.isabs(stored_path):
                         full_path = stored_path
-                        current_app.logger.debug(f"            将存储的路径视为绝对路径: '{full_path}'")
+                        current_app.logger.debug(f"将存储的路径视为绝对路径: '{full_path}'")
                     else:
                         full_path = os.path.join(upload_base_directory, stored_path)
                         current_app.logger.debug(
                             f"            将相对路径与上传基础目录 '{upload_base_directory}' 拼接: '{full_path}'")
 
                     current_app.logger.debug(
-                        f"            检查文件: ID={pf_obj.id}, Name='{pf_obj.original_name}', Stored Path='{stored_path}', Resolved Path='{full_path}'")
+                        f"检查文件: ID={pf_obj.id}, Name='{pf_obj.original_name}', Stored Path='{stored_path}', Resolved Path='{full_path}'")
 
                     if os.path.exists(full_path):
                         if os.path.isfile(full_path):
                             files_to_merge_info.append(
                                 {'id': pf_obj.id, 'path': full_path, 'original_name': pf_obj.original_name}
                             )
-                            current_app.logger.debug(f"              已添加文件到合并列表: {full_path}")
+                            current_app.logger.debug(f"已添加文件到合并列表: {full_path}")
                         else:
-                            current_app.logger.warning(f"            路径存在但不是文件, 跳过: {full_path}")
+                            current_app.logger.warning(f"路径存在但不是文件, 跳过: {full_path}")
                     else:
-                        current_app.logger.warning(f"            在解析的路径未找到文件, 跳过: {full_path}")
+                        current_app.logger.warning(f"在解析的路径未找到文件, 跳过: {full_path}")
 
     current_app.logger.info(f"总共找到 {len(files_to_merge_info)} 个要合并的 PDF 文件。")
     return files_to_merge_info
@@ -461,17 +455,17 @@ def _generate_base_merged_pdf(project_id, merge_config, selected_file_ids=None):
         else:
             current_app.logger.info(f"Found {len(content_file_infos)} 要附加的内容文件.")
 
-        # 4. Append Content Files
+        # 4. 追加内容文件
         for i, file_info in enumerate(content_file_infos):
             file_path = file_info['path']
             original_name = file_info['original_name']
             current_app.logger.info(
                 f"  Appending content file {i + 1}/{len(content_file_infos)}: '{original_name}' from path '{file_path}'")
             try:
-                # CORRECTED LINE: Replaced import_bookmarks with import_outline
+                # 更正的行：将 import_bookmarks 替换为 import_outline
                 merger.append(file_path, outline_item=original_name, import_outline=False)
             except Exception as append_error:
-                current_app.logger.error(f"    附加文件时出错 '{original_name}' ({file_path}): {append_error}",
+                current_app.logger.error(f"附加文件时出错 '{original_name}' ({file_path}): {append_error}",
                                          exc_info=True)
                 raise append_error
 
@@ -480,7 +474,7 @@ def _generate_base_merged_pdf(project_id, merge_config, selected_file_ids=None):
         current_app.logger.info(f"将 PDF 合并到: {base_merged_pdf_path}")
         merger.write(base_merged_pdf_path)
         merger.close()
-        current_app.logger.info("Base merged PDF written and merger closed.")
+        current_app.logger.info("基础合并 PDF 已编写并关闭.")
 
         try:
             reader_check = PdfReader(base_merged_pdf_path)
@@ -493,8 +487,8 @@ def _generate_base_merged_pdf(project_id, merge_config, selected_file_ids=None):
         return base_merged_pdf_path, None, pdf_temp_dir
 
     except Exception as e:
-        current_app.logger.error(f"Error during _generate_base_merged_pdf: {str(e)}", exc_info=True)
-        if 'merger' in locals() and merger is not None:  # type: ignore
+        current_app.logger.error(f"合并基础 PDF 期间出错：{str(e)}", exc_info=True)
+        if 'merger' in locals() and merger is not None:  # 类型：忽略
             try:
                 merger.close()
                 current_app.logger.info("在异常处理期间关闭合并.")
@@ -543,22 +537,22 @@ def generate_paged_preview_data(project_id, merge_config, selected_file_ids=None
             reader_check = PdfReader(base_merged_pdf_path)
             num_pages_to_convert = len(reader_check.pages)
             current_app.logger.info(
-                f"尝试转换 PDF '{base_merged_pdf_path}' with {num_pages_to_convert} pages to images.")
+                f"尝试转换 PDF '{base_merged_pdf_path}' with {num_pages_to_convert} 页面转换为图像。")
         except Exception as read_error:
-            current_app.logger.error(f"Could not read base merged PDF before conversion: {read_error}")
-            num_pages_to_convert = "Unknown"  # type: ignore
+            current_app.logger.error(f"转换前无法读取基本合并的 PDF： {read_error}")
+            num_pages_to_convert = "Unknown"  # 类型：忽略
 
         images = convert_from_path(base_merged_pdf_path, dpi=100, fmt='png')
-        current_app.logger.info(f"Successfully converted PDF to {len(images)} PIL images.")
+        current_app.logger.info(f"已成功将 PDF 转换为 {len(images)}PIL 图像。")
 
-        if num_pages_to_convert != "Unknown" and int(num_pages_to_convert) != len(images):  # type: ignore
+        if num_pages_to_convert != "未知" and int(num_pages_to_convert) != len(images):  # 类型：忽略
             current_app.logger.warning(
                 f"Mismatch: Expected {num_pages_to_convert} pages, but converted {len(images)} images.")
 
         for i, image in enumerate(images):
             image_filename = f"page_{i}.png"
             image_path_abs = os.path.join(session_image_dir_abs, image_filename)
-            current_app.logger.debug(f"  Saving image for page {i} to {image_path_abs}")
+            current_app.logger.debug(f"  为页面保存图像 {i} to {image_path_abs}")
             image.save(image_path_abs, "PNG")
 
             image_url = url_for('file_merge_refactored.serve_temp_preview_image',
@@ -572,24 +566,24 @@ def generate_paged_preview_data(project_id, merge_config, selected_file_ids=None
                 "image_url": image_url
             })
 
-        current_app.logger.info(f"Finished generating {len(pages_data)} page previews.")
+        current_app.logger.info(f"完成生成{len(pages_data)} 页面预览数据。")
 
         if pdf_temp_dir and os.path.exists(pdf_temp_dir):
             shutil.rmtree(pdf_temp_dir)
-            current_app.logger.info(f"Cleaned up temporary PDF directory: {pdf_temp_dir}")
+            current_app.logger.info(f"清理了临时 PDF 目录：{pdf_temp_dir}")
 
         return preview_session_id, pages_data, None, session_image_dir_abs
 
     except (PDFInfoNotInstalledError, PDFPageCountError, PDFSyntaxError) as pdf_err:
         current_app.logger.error(
-            f"PDF 到图像转换错误：{str(pdf_err)} - Check Poppler installation and PDF validity.",
+            f"PDF 到图像转换错误：{str(pdf_err)} -检查 Poppler 安装和 PDF 有效性.",
             exc_info=True)
         error_msg = f"无法转换PDF页面为图片: {str(pdf_err)}。请确保Poppler已正确安装并配置在服务器。(Could not convert PDF pages to images. Ensure Poppler is correctly installed and configured on the server.)"
         if pdf_temp_dir and os.path.exists(pdf_temp_dir): shutil.rmtree(pdf_temp_dir)
         if os.path.exists(session_image_dir_abs): shutil.rmtree(session_image_dir_abs)
         return None, None, error_msg, None
     except Exception as e:
-        current_app.logger.error(f"Unexpected error in generate_paged_preview_data: {str(e)}", exc_info=True)
+        current_app.logger.error(f"generate_paged_preview_data 中出现意外错误： {str(e)}", exc_info=True)
         if pdf_temp_dir and os.path.exists(pdf_temp_dir): shutil.rmtree(pdf_temp_dir)
         if os.path.exists(session_image_dir_abs): shutil.rmtree(session_image_dir_abs)
         return None, None, str(e), None
@@ -611,7 +605,7 @@ def build_final_pdf(project_id, merge_config, selected_file_ids=None, pages_to_d
                                                                                selected_file_ids)
 
     if error:
-        current_app.logger.error(f"Failed to generate base merged PDF for final build: {error}")
+        current_app.logger.error(f"无法为最终构建生成基本合并的 PDF：{error}")
         return None, error, None
 
     if not base_merged_pdf_path or not os.path.exists(base_merged_pdf_path):
@@ -621,7 +615,7 @@ def build_final_pdf(project_id, merge_config, selected_file_ids=None, pages_to_d
         return None, "Failed to create the base PDF file for finalization.", None
 
     final_pdf_processing_temp_dir = tempfile.mkdtemp(prefix=f"final_pdf_{project.id}_")
-    current_app.logger.info(f"Created final processing temp directory: {final_pdf_processing_temp_dir}")
+    current_app.logger.info(f"已创建最终处理临时目录： {final_pdf_processing_temp_dir}")
 
     try:
         pdf_path_before_numbering = os.path.join(final_pdf_processing_temp_dir, f"{project.name}_deleted_pages.pdf")
@@ -641,20 +635,20 @@ def build_final_pdf(project_id, merge_config, selected_file_ids=None, pages_to_d
                 f"Original pages: {original_page_count}, Pages deleted: {deleted_count}, Pages remaining: {len(writer.pages)}")
             with open(pdf_path_before_numbering, "wb") as f_out:
                 writer.write(f_out)
-            current_app.logger.info(f"PDF with deleted pages saved to: {pdf_path_before_numbering}")
+            current_app.logger.info(f"已删除页面的 PDF 存储到：{pdf_path_before_numbering}")
         else:
-            current_app.logger.info("No pages to delete. Copying base merged PDF.")
+            current_app.logger.info("没有要删除的页面。复制基础合并的 PDF.")
             shutil.copy(base_merged_pdf_path, pdf_path_before_numbering)
 
         if base_pdf_temp_dir and os.path.exists(base_pdf_temp_dir):
             shutil.rmtree(base_pdf_temp_dir)
-            current_app.logger.info(f"Cleaned up base PDF temp directory: {base_pdf_temp_dir}")
+            current_app.logger.info(f"清理了基本 PDF 临时目录： {base_pdf_temp_dir}")
             base_pdf_temp_dir = None
 
         final_output_filename = f"{project.name}_final_merged.pdf"
         final_output_path_with_pagenumbers = os.path.join(final_pdf_processing_temp_dir, final_output_filename)
         current_app.logger.info(
-            f"Adding page numbers to '{pdf_path_before_numbering}' -> '{final_output_path_with_pagenumbers}'")
+            f"添加页码 '{pdf_path_before_numbering}' -> '{final_output_path_with_pagenumbers}'")
 
         numbered_pdf_path = add_page_numbers_to_pdf(pdf_path_before_numbering, final_output_path_with_pagenumbers)
 
@@ -662,11 +656,11 @@ def build_final_pdf(project_id, merge_config, selected_file_ids=None, pages_to_d
             current_app.logger.error("添加页码失败或缺少最终编号的 PDF。")
             raise RuntimeError("页码排序失败。")
 
-        current_app.logger.info(f"Final PDF with page numbers created: {numbered_pdf_path}")
+        current_app.logger.info(f"已创建页码的最终 PDF： {numbered_pdf_path}")
         return numbered_pdf_path, None, final_pdf_processing_temp_dir
 
     except Exception as e:
-        current_app.logger.error(f"Error during build_final_pdf: {str(e)}", exc_info=True)
+        current_app.logger.error(f"生成最终 PDF 期间出错： {str(e)}", exc_info=True)
         if base_pdf_temp_dir and os.path.exists(base_pdf_temp_dir):
             shutil.rmtree(base_pdf_temp_dir)
             current_app.logger.info(f"在错误处理期间清理了基本 PDF 临时目录 {base_pdf_temp_dir} ")

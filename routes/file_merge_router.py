@@ -8,20 +8,18 @@ from urllib.parse import quote
 from flask import (
     Blueprint, jsonify, send_file, Response,
     stream_with_context, current_app, request,
-    send_from_directory  # Added for serving static files if needed
+    send_from_directory  # 添加了用于在需要时提供静态文件的功能
 )
 from flask_cors import CORS
 
 from models import User, Project, ProjectFile  # type: ignore
 
-# Import new/modified functions from file_merger
 from .file_merger import (
     generate_paged_preview_data,
     build_final_pdf,
     TEMP_PREVIEW_IMAGE_SUBDIR  # Import the constant
 )
 
-# Create Blueprint
 merge_bp = Blueprint('file_merge_refactored', __name__, url_prefix='/api/filles')
 CORS(merge_bp)
 # 合并会话的内存存储（考虑将 Redis/DB 用于生产）
@@ -265,7 +263,7 @@ def finalize_merge_route():
                 with open(final_pdf_path, "rb") as f:
                     yield from f
             finally:
-                pass  # Cleanup is handled by response.call_on_close
+                pass  # 清理由 response.call_on_close 处理
 
         base_filename_final = f"{project.name}_final_merged.pdf"
         encoded_filename_final = quote(base_filename_final)
@@ -278,7 +276,6 @@ def finalize_merge_route():
 
         update_session_progress(session_id_for_finalize, 100, "最终合并成功 (Final merge successful)", completed=True)
 
-        # Use the helper to call cleanup_session within an app context
         response.call_on_close(
             lambda: call_with_app_context(actual_app, cleanup_session, session_id_for_finalize)
         )
@@ -286,10 +283,10 @@ def finalize_merge_route():
         return response
 
     except Exception as e:
-        current_app.logger.error(f"Unexpected error in finalize_merge_route: {str(e)}", exc_info=True)
+        current_app.logger.error(f"finalize_merge_route 中出现意外错误: {str(e)}", exc_info=True)
         update_session_progress(session_id_for_finalize, 100, f"服务器内部错误 (Internal server error): {str(e)}",
                                 completed=True, error=str(e))
-        # Call cleanup here as well in case of an unexpected error before response.call_on_close is set up
+        # 如果在设置 response.call_on_close 之前出现意外错误，也可以在此处调用 cleanup
         call_with_app_context(actual_app, cleanup_session, session_id_for_finalize)
         return jsonify(
             {'error': f"最终合并PDF时发生未预期的错误 (Unexpected error during final PDF merge): {str(e)}"}), 500
@@ -315,9 +312,9 @@ def merge_progress_sse(session_id):
         last_status_message = ""
         last_error = None
         start_time = time.time()
-        timeout_seconds = 300  # 5 minutes timeout for SSE stream if no activity
+        timeout_seconds = 300  # 如果没有活动，则 SSE 流超时 5 分钟
 
-        # It's better to get the app object once if possible, or handle its absence.
+        # 如果可能，最好获取一次 app 对象，或者处理它的缺失。
         app_for_sse_logging = current_app._get_current_object() if current_app else None
 
         while True:
@@ -331,14 +328,14 @@ def merge_progress_sse(session_id):
                 if app_for_sse_logging:
                     app_for_sse_logging.logger.warning(f"SSE stream for session {session_id} timed out.")
                 else:
-                    print(f"WARNING: SSE stream for session {session_id} timed out (no app context for logger).")
+                    print(f"警告：会话的 SSE 流 {session_id} 超时（无 Logger 的应用程序上下文）.")
 
                 yield f"data: {{ \"progress\": {session_data.get('progress', 0)}, \"status_message\": \"操作超时 (Operation timed out).\", \"completed\": true, \"error\": \"超时 (Timeout)\" }}\n\n"
-                # If SSE times out, it should also trigger cleanup for that session.
+                # 如果 SSE 超时，它也应该触发该会话的清理。
                 if app_for_sse_logging:
                     call_with_app_context(app_for_sse_logging, cleanup_session, session_id)
                 else:  # 如果 app_for_sse_logging 为 None，则回退（理想情况下不应在请求中发生）
-                    print(f"ERROR: Cannot cleanup session {session_id} on SSE timeout due to missing app context.")
+                    print(f"错误：无法清理会话 {session_id}由于缺少应用程序上下文而导致 SSE 超时.")
                 break
 
             progress = session_data.get('progress', 0)
@@ -358,7 +355,7 @@ def merge_progress_sse(session_id):
                 try:
                     json_data_string = jsonify(event_data).get_data(as_text=True)
                     yield f"data: {json_data_string}\n\n"
-                except RuntimeError:  # Likely out of context
+                except RuntimeError:  # 可能断章取义
                     if app_for_sse_logging:
                         app_for_sse_logging.logger.error(
                             "由于缺少应用程序上下文，jsonify 在 SSE 流中失败。可能需要手动构建 JSON.")

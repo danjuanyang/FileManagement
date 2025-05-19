@@ -1199,7 +1199,7 @@ def get_my_subprojects(current_user):
             'project_name': sp.project.name if sp.project else "未知项目",
             'start_date': sp.start_date.strftime('%Y-%m-%d'),
             'deadline': sp.deadline.strftime('%Y-%m-%d'),
-            'progress': sp.progress,
+            'progress': round(sp.progress,2) if sp.progress else 0,
             'status': sp.status,
             'employee_id': sp.employee_id,
             'stages': [{
@@ -1208,7 +1208,7 @@ def get_my_subprojects(current_user):
                 'description': s.description,
                 'start_date': s.start_date.strftime('%Y-%m-%d'),
                 'end_date': s.end_date.strftime('%Y-%m-%d'),
-                'progress': s.progress,
+                'progress': round(s.progress,2) if s.progress else 0,
                 'status': s.status,
                 'tasks': [{
                     'id': t.id,
@@ -1216,7 +1216,7 @@ def get_my_subprojects(current_user):
                     'description': t.description,
                     'due_date': t.due_date.strftime('%Y-%m-%d'),
                     'status': t.status,
-                    'progress': t.progress
+                    'progress': round(t.progress,2) if t.progress else 0
                 } for t in s.tasks]
             } for s in sp.stages]
         } for sp in subprojects])
@@ -1285,7 +1285,7 @@ def get_assigned_projects_dashboard(current_user):
                 'project_name': project_name,
                 'startDate': subproject.start_date.strftime('%Y-%m-%d'),
                 'deadline': subproject.deadline.strftime('%Y-%m-%d'),
-                'progress': subproject.progress,
+                'progress': round(subproject.progress,2) if subproject.progress is not None else None,
                 'status': subproject.status,
                 'stages_count': len(stages)
             }
@@ -1391,7 +1391,7 @@ def get_assigned_projects_data(current_user):
                 'description': subproject.description,
                 'startDate': subproject.start_date.isoformat(),
                 'deadline': subproject.deadline.isoformat(),
-                'progress': subproject.progress,
+                'progress': round(subproject.progress,2) if subproject.progress is not None else None,
                 'status': subproject.status,
                 'project_id': subproject.project_id,
                 'project_name': project.name if project else "未知项目",

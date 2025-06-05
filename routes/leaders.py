@@ -10,7 +10,7 @@ from user_agents import parse
 from models import db, Project, ProjectFile, User, StageTask, ProjectStage, EditTimeTracking, ReportClockinDetail, \
     ReportClockin, UserSession, TaskProgressUpdate, Subproject, AnnouncementReadStatus, UserActivityLog, Comment, Reply, \
     AIConversation, AIApi
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 from routes.employees import token_required
 from utils.activity_tracking import track_activity, log_user_activity
@@ -1250,7 +1250,7 @@ def get_daily_updates(current_user):
         # 始终在分页前排序以获得一致的结果
         query = query.order_by(TaskProgressUpdate.created_at.desc())
 
-        # --- Apply Pagination ---
+        # --- 应用分页 ---
         # 如果页面超出范围，则 error_out=False 可防止 404 错误，而是返回空列表.
         updates_page = query.paginate(page=page, per_page=per_page, error_out=False)
 
@@ -1285,3 +1285,88 @@ def get_daily_updates(current_user):
         # 最好记录实际的异常以进行调试
         print(f"get_daily_updates 中的错误：{str(e)}")  # 或者使用合适的记录器
         return jsonify({'error': f'获取每日动态时发生服务器错误: {str(e)}'}), 500
+
+
+# 周更新统计
+@leader_bp.route('/weekly-updates', methods=['GET'])
+@track_activity
+@token_required
+def get_weekly_updates(current_user):
+    if current_user.role not in [0, 1]:  # 假设0是超级管理员, 1是领导
+        return jsonify({'error': '权限不足'}), 403
+
+    target_date_str = request.args.get('date')
+    employee_id = request.args.get('employee_id', type=int)
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)  # 如果 frontend 未提供，则默认为 10
+
+    try:
+        if target_date_str:
+            target_date_obj = datetime.strptime(target_date_str, '%Y-%m-%d').date()
+        else:
+            target_date_obj = date.today()  # 默认为今天
+
+        # 计算本周的开始和结束日期
+        start_of_week = target_date_obj - timedelta(days=target_date_obj.weekday())
+        end_of_week = start_of_week + timedelta(days=6)
+
+        start_datetime = datetime.combine(start_of_week, datetime.min.time())
+        end_datetime = datetime.combine(end_of_week, datetime.max.time())
+
+        query = db.session.query(
+            TaskProgressUpdate,
+            User,
+            StageTask,
+            ProjectStage,
+            Project,
+            Subproject
+        ).join(User, TaskProgressUpdate.recorder_id == User.id) \
+            .join(StageTask, TaskProgressUpdate.task_id == StageTask.id) \
+            .join(ProjectStage, StageTask.stage_id == ProjectStage.id) \
+            .join(Project, ProjectStage.project_id == Project.id) \
+            .outerjoin(Subproject, ProjectStage.subproject_id == Subproject.id) \
+            .filter(TaskProgressUpdate.created_at >= start_datetime) \
+            .filter(TaskProgressUpdate.created_at <= end_datetime)
+
+        if employee_id:
+            query = query.filter(User.id == employee_id)
+
+        # 始终在分页前排序以获得一致的结果
+        query = query.order_by(TaskProgressUpdate.created_at.desc())
+
+        # --- 应用分页 ---
+        # 如果页面超出范围，则 error_out=False 可防止 404 错误，而是返回空列表.
+        updates_page = query.paginate(page=page, per_page=per_page, error_out=False)
+
+        raw_updates_paginated = updates_page.items  # 获取当前页面的项目
+
+        updates_list = []
+        for tpu, user, task, stage, project, subproject in raw_updates_paginated:
+            updates_list.append({
+                'employee_name': user.username,
+                'project_name': project.name,
+                'subproject_name': subproject.name if subproject else None,
+                'stage_name': stage.name if stage else None,  # 添加了对阶段的检查
+                'task_name': task.name if task else None,  # 添加了任务检查
+                'update_content': tpu.description,
+                'update_timestamp': tpu.created_at.isoformat(),
+                'progress': tpu.progress
+            })
+
+        return jsonify({
+            'weekly_updates': updates_list,
+            'total': updates_page.total,  # 与查询匹配的项总数
+            'current_page': updates_page.page,  # 当前页码
+            'per_page': updates_page.per_page,  # 每页项目数
+            'pages': updates_page.pages,  # 总页数
+            'has_next': updates_page.has_next,  # 布尔值（如果有下一页）
+            'has_prev': updates_page.has_prev,  # 如果有上一页，则为布尔值
+        })
+
+    except ValueError:
+        return jsonify({'error': '无效的日期格式, 请使用 YYYY-MM-DD'}), 400
+    except Exception as e:
+        # 最好记录实际的异常以进行调试
+        print(f"get_weekly_updates 中的错误：{str(e)}")  # 或者使用合适的记录器
+        return jsonify({'error': f'获取每周动态时发生服务器错误: {str(e)}'}), 500
+

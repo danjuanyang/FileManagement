@@ -11,12 +11,39 @@ from flask_cors import CORS
 from flask_migrate import Migrate
 from models import db
 
-# APScheduler
+# APScheduler 配置
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-# === 备份函数 ===
+# === 电子邮件和API配置 ===
+MAIL_CONFIG = {
+    'SMTP_SERVER': 'smtp.126.com',  # SMTP 服务器地址
+    'SMTP_PORT': 587,  # SMTP 服务器端口 (TLS)
+    'SMTP_USERNAME': 'danjuanyang@126.com',  # 邮箱用户名
+    'SMTP_PASSWORD': 'ETYZZcAAwVTWzUqM',  # 邮箱密码或应用专用密码
+    'SENDER_EMAIL': 'danjuanyang@126.com',  # 发件人邮箱
+    # 每周周报和每月报表的接收者邮箱列表
+    # 'RECIPIENTS': ['recipient1@example.com', 'recipient2@example.com']
+    'RECIPIENTS': ['reealme@qq.com']
+}
 
+API_CONFIG = {
+    # 确保这是Flask 应用运行的正确地址和端口
+    'BASE_URL': 'http://127.0.0.1:6543',
+    # 用于访问需要认证的API端点的认证令牌
+    'AUTH_TOKEN': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJpYXQiOjE3NDkxOTM3OTZ9.3cZS9jqia9V9HT10AaR1Gbg7xsmgq_escIpfZAQuZXc'
+}
+
+# === 计划任务配置 ===
+SCHEDULE_CONFIG = {
+    # 每周五 20:00 发送周报邮件
+    'weekly_report': {'day_of_week': 'fri', 'hour': 20, 'minute': 0},
+    # 每月25日的某个时间点发送月度考勤报告 (上午10点)
+    'monthly_report': {'day': 25, 'hour': 10, 'minute': 0}
+}
+
+
+# === 备份函数 (原有的) ===
 def backup_folders():
     source_dirs = {
         'FileManagementFolder': '/volume1/web/FileManagementFolder',
@@ -24,7 +51,6 @@ def backup_folders():
         'Dist': '/volume1/docker/nginx',  # 前端打包文件
     }
     backup_dir = '/volume1/web/backup'
-    # 最多保留5份
     max_backups = 5
 
     try:
@@ -67,24 +93,27 @@ def clean_old_backups(backup_dir, name_prefix, max_backups):
             print(f"删除备份文件时出错: {e}")
 
 
-# === 启动 APScheduler 定时任务 ===
-
+# === 启动 APScheduler 定时任务 (原有的) ===
+# 注意：邮件的定时任务将在 Email_reminder.py 中独立运行
 def start_backup_scheduler():
     scheduler = BackgroundScheduler()
-    trigger = CronTrigger(hour=2, minute=0)  # 每天凌晨 2 点
+    # 每天凌晨 2 点
+    trigger = CronTrigger(hour=2, minute=0)
     scheduler.add_job(backup_folders, trigger, id="daily_backup", replace_existing=True)
     scheduler.start()
     print("定时备份任务已启动（每天凌晨 2 点）")
 
 
-# === Flask 应用初始化 ===
-
+# === Flask 应用初始化 (原有的) ===
 def create_app():
     app = Flask(__name__)
     CORS(app)
 
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['SECRET_KEY'] = '9888898888'
+
+    # 将邮件配置加载到 Flask app config (可选，但推荐)
+    app.config['MAIL_CONFIG'] = MAIL_CONFIG
 
     migrate = Migrate(app, db)
 

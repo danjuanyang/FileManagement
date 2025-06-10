@@ -238,10 +238,10 @@ if __name__ == "__main__":
     print("邮件提醒服务启动...")
     setup_scheduler()
 
-    print("\n--- 正在执行立即测试 ---")
-    send_weekly_update_email()
-    send_monthly_clockin_report()
-    print("--- 测试完成 ---\n")
+    # print("\n--- 正在执行立即测试 ---")
+    # send_weekly_update_email()
+    # send_monthly_clockin_report()
+    # print("--- 测试完成 ---\n")
 
     print("服务已启动，等待定时任务触发...")
     while True:

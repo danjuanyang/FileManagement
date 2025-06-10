@@ -1369,4 +1369,3 @@ def get_weekly_updates(current_user):
         # 最好记录实际的异常以进行调试
         print(f"get_weekly_updates 中的错误：{str(e)}")  # 或者使用合适的记录器
         return jsonify({'error': f'获取每周动态时发生服务器错误: {str(e)}'}), 500
-

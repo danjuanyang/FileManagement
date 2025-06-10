@@ -652,3 +652,99 @@ db.Index('idx_ai_messages_conversation_id', AIMessage.conversation_id)
 db.Index('idx_ai_conversations_user_id', AIConversation.user_id)
 db.Index('idx_ai_conversations_updated_at', AIConversation.updated_at)
 db.Index('idx_ai_message_feedback_message_id', AIMessageFeedback.message_id)
+
+
+# --------------
+# [新增] 知识库主表
+class KnowledgeBase(db.Model):
+    __tablename__ = 'knowledge_bases'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)  # 知识库名称，必须唯一
+    description = db.Column(db.Text, nullable=True)  # 描述信息
+    created_by_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    # --- 关系定义 ---
+    # 一个知识库可以包含多个根节点
+    nodes = db.relationship('KnowledgeBaseNode', back_populates='knowledge_base', cascade='all, delete-orphan')
+    creator = db.relationship('User', backref='created_knowledge_bases')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'created_by_id': self.created_by_id,
+            'created_at': self.created_at.isoformat()
+        }
+
+
+# [修改] 知识库节点模型
+class KnowledgeBaseNode(db.Model):
+    __tablename__ = 'knowledge_base_nodes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+
+    # --- 核心：自引用外键 ---
+    parent_id = db.Column(db.Integer, db.ForeignKey('knowledge_base_nodes.id', ondelete='CASCADE'), nullable=True)
+
+    # --- 新增外键，关联到知识库主表 ---
+    kb_id = db.Column(db.Integer, db.ForeignKey('knowledge_bases.id'), nullable=False)
+
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    # --- 关系定义 ---
+    parent = db.relationship('KnowledgeBaseNode', remote_side=[id],
+                             backref=db.backref('children', lazy='dynamic', cascade='all, delete-orphan'))
+    files = db.relationship('KnowledgeBaseFile', back_populates='node', cascade='all, delete-orphan')
+
+    # 新增关系，反向引用到知识库主表
+    knowledge_base = db.relationship('KnowledgeBase', back_populates='nodes')
+
+    def to_dict(self, include_children=True):
+        node_dict = {
+            'id': self.id,
+            'kb_id': self.kb_id,  # 返回所属知识库ID
+            'name': self.name,
+            'description': self.description,
+            'parent_id': self.parent_id,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat(),
+            'files': [file.to_dict() for file in self.files]
+        }
+        if include_children:
+            # 查询时需要注意过滤kb_id
+            children_query = self.children.filter(KnowledgeBaseNode.kb_id == self.kb_id)
+            node_dict['children'] = [child.to_dict() for child in children_query]
+        else:
+            node_dict['children'] = []
+        return node_dict
+
+
+# 知识库文件模型
+class KnowledgeBaseFile(db.Model):
+    __tablename__ = 'knowledge_base_files'
+    id = db.Column(db.Integer, primary_key=True)
+    node_id = db.Column(db.Integer, db.ForeignKey('knowledge_base_nodes.id'), nullable=False)
+    original_name = db.Column(db.String(255), nullable=False)
+    file_path = db.Column(db.String(255), nullable=False)
+    file_type = db.Column(db.String(100))
+    upload_user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    upload_date = db.Column(db.DateTime, default=datetime.now)
+    node = db.relationship('KnowledgeBaseNode', back_populates='files')
+    upload_user = db.relationship('User', backref='knowledge_base_files')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'node_id': self.node_id,
+            'original_name': self.original_name,
+            'file_path': self.file_path,
+            'file_type': self.file_type,
+            'upload_user_id': self.upload_user_id,
+            'upload_date': self.upload_date.isoformat()
+        }

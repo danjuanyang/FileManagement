@@ -15,6 +15,7 @@ from routes.AI_assistant import ai_bp
 from routes.admin import admin_bp
 from routes.announcements import announcement_bp
 from routes.filemanagement import files_bp
+from routes.knowledge_base import kb_bp
 from routes.leaders import leader_bp
 from routes.employees import employee_bp
 from routes.projectplan import projectplan_bp
@@ -37,7 +38,7 @@ app.register_blueprint(admin_bp, url_prefix='/api/admin')
 app.register_blueprint(training_bp, url_prefix='/api/training')
 
 app.register_blueprint(ai_bp, url_prefix='/api/ai')  # 注册AI蓝图
-
+app.register_blueprint(kb_bp,url_prefix='/api/kb')  # 注册知识库蓝图
 
 # 用户登录接口
 @app.route('/api/login', methods=['POST'])

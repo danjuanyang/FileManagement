@@ -112,8 +112,10 @@ def create_app():
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['SECRET_KEY'] = '9888898888'
 
-    # 将邮件配置加载到 Flask app config (可选，但推荐)
+    # 将邮件配置加载到 Flask app config
     app.config['MAIL_CONFIG'] = MAIL_CONFIG
+    # 这里设置的是上传的根目录，具体的子目录 将在路由中处理
+    app.config['UPLOAD_FOLDER'] = '/volume1/web/FileManagementFolder/uploads'
 
     migrate = Migrate(app, db)
 

@@ -4,9 +4,9 @@ from functools import wraps
 from flask import Blueprint, request, jsonify, current_app, send_from_directory
 from werkzeug.utils import secure_filename
 from datetime import datetime
+import mimetypes  # 导入 mimetypes
 
-# 假设您的 models.py 文件和 token_required 装饰器位于以下路径
-# 请根据您的项目结构调整导入
+
 from models import db, User, KnowledgeBase, KnowledgeBaseNode, KnowledgeBaseFile
 from routes.employees import token_required
 
@@ -30,6 +30,21 @@ def permission_required(roles):
         return decorated_function
 
     return decorator
+
+
+# --- 新增API：获取当前用户信息 ---
+@kb_bp.route('/users/me', methods=['GET'])
+@token_required
+def get_current_user_profile(current_user):
+    """获取当前登录用户的信息 (包括角色)"""
+    if not current_user:
+        return jsonify({"error": "用户未找到或Token无效"}), 404
+
+    return jsonify({
+        "id": current_user.id,
+        "username": current_user.username,
+        "role": current_user.role
+    }), 200
 
 
 # --- 辅助函数 ---
@@ -166,7 +181,7 @@ def update_node(current_user, node_id):
     if 'description' in data:
         node.description = data['description']
 
-    node.updated_at = datetime.utcnow()
+    node.updated_at = datetime.now()  # 修复：正确地更新时间
     db.session.commit()
     return jsonify(node.to_dict(include_children=False)), 200
 
@@ -252,7 +267,9 @@ def upload_file(current_user, node_id):
         filename = secure_filename(file.filename)
         # 创建一个与知识库相关的唯一文件路径
         kb_folder = f"kb_{node.kb_id}"
-        upload_path = os.path.join(current_app.config['UPLOAD_FOLDER'], 'knowledge_base', kb_folder)
+
+        base_upload_path = current_app.config['UPLOAD_FOLDER']
+        upload_path = os.path.join(base_upload_path, 'knowledge_base', kb_folder)
         os.makedirs(upload_path, exist_ok=True)
 
         # 防止文件名冲突，可以加上时间戳或UUID
@@ -301,30 +318,37 @@ def delete_file(current_user, file_id):
         return jsonify({'error': f'删除文件时发生错误: {str(e)}'}), 500
 
 
+# --- 优化 #4: 修改下载路由以支持预览 ---
 @kb_bp.route('/download/files/<int:file_id>', methods=['GET'])
 @token_required
 def download_file(current_user, file_id):
-    """下载一个文件 (对所有登录用户开放)"""
+    """下载或预览一个文件 (对所有登录用户开放)"""
     file_record = KnowledgeBaseFile.query.get_or_404(file_id)
+
+    # 检查 'preview' 查询参数
+    is_preview = request.args.get('preview', 'false').lower() == 'true'
 
     try:
         directory = os.path.join(current_app.config['UPLOAD_FOLDER'])
-        # file_record.file_path 已经是相对路径，例如 'knowledge_base/kb_1/2023..._doc.pdf'
-        # 我们需要从这个路径中分离出目录和文件名
         path_parts = file_record.file_path.replace('\\', '/').split('/')
         filename = path_parts[-1]
         sub_directory = '/'.join(path_parts[:-1])
 
         full_directory_path = os.path.join(directory, sub_directory)
 
+        # 尝试获取mimetype，如果失败则使用通用类型
+        mimetype, _ = mimetypes.guess_type(file_record.original_name)
+        if mimetype is None:
+            mimetype = 'application/octet-stream'
+
         return send_from_directory(
             full_directory_path,
             filename,
-            as_attachment=True,
-            download_name=file_record.original_name  # 让用户下载时看到的是原始文件名
+            as_attachment=not is_preview,  # 如果是预览，则不是附件
+            download_name=file_record.original_name,
+            mimetype=mimetype  # 指定mimetype
         )
     except FileNotFoundError:
         return jsonify({'error': '文件在服务器上未找到'}), 404
     except Exception as e:
         return jsonify({'error': f'下载文件时出错: {str(e)}'}), 500
-
